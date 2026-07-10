@@ -72,16 +72,14 @@ _start:
     // stack pointer alignment and local variable1 pid
     subq $8, %rsp
 
-    # call syslog
+    call syslog
 
     // getpid
-    movl $1, %eax
+    movl $39, %eax
     movl $1, %edi
     movl $0, %esi
     movl $10, %edx
     syscall
-
-    ud2
 
     // save pid to var1
     movl %eax, (%rsp)
