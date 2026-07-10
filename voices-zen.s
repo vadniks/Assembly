@@ -1,26 +1,41 @@
 // Author: https://github.com/vadniks
-// License: GNU GPLv3 - ya really wanna copy/use this? - c'mmon - just why... it's not for production of course... just to laugh;)
-// Brief: programming example and a playfull challenge (joke) on topic: artistic description of what is happening inside one's mind, stylized to resemble a
-//        computer program error - with correct and realistic behavior which can be completely reproduced programmatically, this time - in x86_64
+// License: GNU GPLv3 - ya really wanna copy/use this? - c'mmon - just why... it's
+//          not for production of course... just to laugh;)
+// Brief: programming example and a playfull challenge (joke) on topic: artistic
+//        description of what is happening inside one's mind, stylized to
+//        resemble a computer program error - with correct and realistic behavior
+//        which can be completely reproduced programmatically, this time - in x86_64
 //        linux/systemV gnu asm assembly language
-// Description: print an error to linux system journal via ipc/sockets and self-terminate having risen an abort signal to cause the core dump
+// Description: print an error to linux system journal via ipc/sockets and
+//              self-terminate having risen an abort signal to cause the
+//              core dump
 //
 // as -o voices-xen.o voices-zen.s
-// ld -s -pie -z relro -z now -z noexecstack --as-needed -nostdlib -o voices-xen voices-xen.o -dynamic-linker /lib64/ld-linux-x86-64.so.2
+// ld -s -pie -z relro -z now -z noexecstack -nostdlib \
+//    -o voices-xen voices-xen.o -dynamic-linker \
+//    /lib64/ld-linux-x86-64.so.2
 
 // ------------------------------------------------
 .section .rodata
 
 .balign 16, 0
 ERROR_TEXT:
-    .ascii "Error: unable to bootstrap entity 'AdaScorta_rogue_2.1' type=subpersonality with the following parameters: seed=0xabcdef insanity=75of100 irascibility=50of100 entropy=high "
-    .ascii "psyche=toxic,brazen,bold,straight,fierce,direct,confident,narcissistic,cynical,playfull,ringleader,childish,assertive,aggressive,energetic,evil,outgoing,performative,cruel,"
-    .ascii "fun,leader,dont-give-a-shit-about-everything-and-everyone gender=female age-group=genz origin=ru appearance=feminine,conventionally-beautiful8of10,thin,bust3of5 "
-    .ascii "intelligence=smart8of10,math,physics,computers,degree,extreme-abstract-thinking,extreme-system-thinking self-esteem=high mood=work-exhausted,unhappy,bored "
-    .ascii "attitude=friend-long-time,accusing,provoking,rival,hateful-moderate,deep-darkness,embittered taste=sweet,tart,spicy,umamy preferences=gaming,music,sport "
-    .ascii "music=pop,heavy,hiphop,classic,covers-remixes complexes=vary,hidden,lonely self-destructive=15of100 relationship=friend,strategic,hopeless reciprocity=33of100 "
-    .ascii "attraction=50of100,initially,faded love=none,never,impossible traumas=cold-parents,raised-without-father,hatred,betrayed,difficult-finance-situation - caused "
-    .ascii "by: NOT_ENOUGH_MEMORY,NO_FREE_COMPUTE_CLUSTERS_AVAILABLE - unable to fire up a new emulated instance via libvirt - the system is likely currently overloaded, aborting...\n"
+    .ascii "Error: unable to bootstrap entity 'AdaScorta_rogue_2.1' type=subpersonality "
+    .ascii "with the following parameters: seed=0xabcdef insanity=75of100 irascibility=50of100 "
+    .ascii "entropy=high psyche=toxic,brazen,bold,straight,fierce,direct,confident,narcissistic,"
+    .ascii "cynical,playfull,ringleader,childish,assertive,aggressive,energetic,evil,outgoing,"
+    .ascii "performative,cruel,fun,leader,dont-give-a-shit-about-everything-and-everyone "
+    .ascii "gender=female age-group=genz origin=ru appearance=feminine,conventionally-beautiful8of10,"
+    .ascii "thin,bust3of5 intelligence=smart8of10,math,physics,computers,degree,extreme-abstract-"
+    .ascii "thinking,extreme-system-thinking self-esteem=high mood=work-exhausted,unhappy,bored "
+    .ascii "attitude=friend-long-time,accusing,provoking,rival,hateful-moderate,deep-darkness,"
+    .ascii "embittered taste=sweet,tart,spicy,umamy preferences=gaming,music,sport music=pop,heavy,"
+    .ascii "hiphop,classic,covers-remixes complexes=vary,hidden,lonely self-destructive=15of100 "
+    .ascii "relationship=friend,strategic,hopeless reciprocity=33of100 attraction=50of100,initially,"
+    .ascii "faded love=none,never,impossible traumas=cold-parents,raised-without-father,hatred,"
+    .ascii "betrayed,difficult-finance-situation - caused by: NOT_ENOUGH_MEMORY,"
+    .ascii "NO_FREE_COMPUTE_CLUSTERS_AVAILABLE - unable to fire up a new emulated instance via "
+    .ascii "libvirt - the system is likely currently overloaded, aborting...\n"
     .type ERROR_TEXT, @object
 
 // length of actual data without alignment
@@ -57,11 +72,16 @@ _start:
     // stack pointer alignment and local variable1 pid
     subq $8, %rsp
 
-    call syslog
+    # call syslog
 
     // getpid
-    movl $39, %eax
+    movl $1, %eax
+    movl $1, %edi
+    movl $0, %esi
+    movl $10, %edx
     syscall
+
+    ud2
 
     // save pid to var1
     movl %eax, (%rsp)
@@ -78,7 +98,8 @@ syslog:
     // cet
     endbr64
 
-    // calculate how much space we need to allocate all local variables and put it into temporary register, if the intermediate is divisible by 16 - skip addition
+    // calculate how much space we need to allocate all local variables and put it into
+    // temporary register, if the intermediate is divisible by 16 - skip addition
     movl $16, %eax
     addl $ERROR_TEXT_LEN, %eax
     addl $SYSLOG_HEADER_LEN, %eax
@@ -133,11 +154,13 @@ syslog:
     testl %eax, %eax
     jnz .syslog.fail
 
-    // copy SYSLOG_HEADER to errorMessage, even though var1 occupies only 4 bytes, we skip 16 bytes to preserve the alignment of addresses
+    // copy SYSLOG_HEADER to errorMessage, even though var1 occupies only 4 bytes,
+    // we skip 16 bytes to preserve the alignment of addresses
     movdqa SYSLOG_HEADER(%rip), %xmm0
     movdqa %xmm0, 16(%rsp)
 
-    // get amount of quadwords needed to copy from the ERROR_TEXT_LEN, if it's already divisible by 8 - skip addition
+    // get amount of quadwords needed to copy from the ERROR_TEXT_LEN, if it's
+    // already divisible by 8 - skip addition
     movl $ERROR_TEXT_LEN, %ecx
     testl $7, %ecx
     pushfq
