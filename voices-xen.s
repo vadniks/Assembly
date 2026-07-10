@@ -10,7 +10,7 @@
 //              self-terminate having risen an abort signal to cause the
 //              core dump
 //
-// as -o voices-xen.o voices-zen.s
+// as -o voices-xen.o voices-xen.s
 // ld -s -pie -z relro -z now -z noexecstack -nostdlib \
 //    -o voices-xen voices-xen.o -dynamic-linker \
 //    /lib64/ld-linux-x86-64.so.2
