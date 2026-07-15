@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Vadim Nikolaev (https://github.com/vadniks)
 // SPDX-License-Identifier: GPL-3.0-only
 
+// THE FILE/PROJECT IS STILL IN DEVELOPMENT (IS BEING PORTED FROM C CODE)
+
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
 //     OpenGL 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, mathematics,
