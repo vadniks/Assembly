@@ -83,16 +83,13 @@ DEBUG_P:
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
 
-.align 16
+.local gMaxAnisotropy
 .type gMaxAnisotropy, @object
-.lcomm gMaxAnisotropy, 4
-# or
-# .local gMaxAnisotropy
-# .type gMaxAnisotropy, @object
-# .comm gMaxAnisotropy, 4, 16
-.align 16
+.comm gMaxAnisotropy, 4, 16
+
+.local gFont
 .type gFont, @object
-.lcomm gFont, 8
+.comm gFont, 8, 16
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -126,7 +123,7 @@ loop:
     callxt SDL_GetTicks
     movq %rax, 8(%rsp)
 
-    movl $0x3f800000, %eax # IEEE-754 floating point hex representation
+    movl $0x3f800000, %eax # IEEE-754 floating point hex representation = 1.f
     movd %eax, %xmm0
     movd %eax, %xmm1
     movd %eax, %xmm2
@@ -191,6 +188,15 @@ main:
     subq $24, %rsp # 0() window, 8() glContext, 16() padding; 16 + 8 + call = 16-aligned
     xorq %rax, %rax
 
+    #
+    # leaq DEBUG_P(%rip), %rdi
+    # leaq gMaxAnisotropy(%rip), %rsi
+    # callxt printf
+    # leaq DEBUG_P(%rip), %rdi
+    # leaq gFont(%rip), %rsi
+    # callxt printf
+    #
+
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
     leaq VIDEO_DRIVERS(%rip), %rsi
     callxt SDL_SetHint
@@ -205,14 +211,14 @@ main:
     call assert
 
     leaq FONT(%rip), %rdi
-    movl $0x3f800000, %eax
+    movl $0x3f800000, %eax # 1.f
     movd %eax, %xmm0
     callxt TTF_OpenFont
     call assert
     movq %rax, gFont(%rip)
 
     movq gFont(%rip), %rdi
-    movl $0x42f00000, %eax
+    movl $0x42f00000, %eax # 120.f
     movd %eax, %xmm0
     movl $100, %esi
     movl $100, %edx
