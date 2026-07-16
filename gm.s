@@ -21,6 +21,8 @@
 // compile, link, run: as -o gm.o gm.s && gcc -s -pie -z relro -z now -lSDL3 -lGL -lGLEW -o gm gm.o && ./gm 
 // build via ninja
 // --> build in one go: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now gm.s -lSDL3 -lGL -lGLEW -o gm
+// GLEW appears to be unnecessary in assembly - calling GL dirrectly
+// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now gm.s -lSDL3 -lSDL3_ttf -lGL -o gm
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
@@ -28,6 +30,7 @@
 WIDTH = 640
 HEIGHT = 640
 UPDATE_PERIOD = 16
+OBJECTS = 3
 
 .align 16
 .local SDL_HINT_VIDEO_DRIVER
@@ -44,6 +47,12 @@ VIDEO_DRIVERS:
 .type EMPTY_STR, @object
 EMPTY_STR:
     .zero 1
+.align 16
+.local FONT
+.type FONT, @object
+FONT:
+    .asciz "font.ttf"
+
 #
 .align 16
 .local DEBUG_LU
@@ -81,6 +90,9 @@ DEBUG_P:
 # .local gMaxAnisotropy
 # .type gMaxAnisotropy, @object
 # .comm gMaxAnisotropy, 4, 16
+.align 16
+.type gFont, @object
+.lcomm gFont, 8
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -189,6 +201,24 @@ main:
     callxt SDL_Init
     call assert
 
+    callxt TTF_Init
+    call assert
+
+    leaq FONT(%rip), %rdi
+    movl $0x3f800000, %eax
+    movd %eax, %xmm0
+    callxt TTF_OpenFont
+    call assert
+    movq %rax, gFont(%rip)
+
+    movq gFont(%rip), %rdi
+    movl $0x42f00000, %eax
+    movd %eax, %xmm0
+    movl $100, %esi
+    movl $100, %edx
+    callxt TTF_SetFontSizeDPI
+    call assert
+
     movl $17, %edi # SDL_GL_CONTEXT_MAJOR_VERSION
     movl $4, %esi
     callxt SDL_GL_SetAttribute
@@ -262,12 +292,6 @@ main:
     movl $0x84ff, %edi # GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
     leaq gMaxAnisotropy(%rip), %rsi
     callxt glGetFloatv
-
-    #
-    leaq DEBUG_P(%rip), %rdi
-    leaq gMaxAnisotropy(%rip), %rsi
-    callxt printf
-    #
     
     movq (%rsp), %rdi
     call loop
@@ -278,6 +302,10 @@ main:
 
     movq (%rsp), %rdi # window
     callxt SDL_DestroyWindow
+
+    movq gFont(%rip), %rdi
+    callxt TTF_CloseFont
+    callxt TTF_Quit
 
     callxt SDL_Quit
 
