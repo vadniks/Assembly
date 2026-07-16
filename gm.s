@@ -30,22 +30,57 @@ HEIGHT = 640
 UPDATE_PERIOD = 16
 
 .align 16
+.local SDL_HINT_VIDEO_DRIVER
+.type SDL_HINT_VIDEO_DRIVER, @object
 SDL_HINT_VIDEO_DRIVER:
     .asciz "SDL_VIDEO_DRIVER"
-    .type SDL_HINT_VIDEO_DRIVER, @object
+.align 16
+.local VIDEO_DRIVERS
+.type VIDEO_DRIVERS, @object
 VIDEO_DRIVERS:
     .asciz "wayland,x11"
-    .type VIDEO_DRIVERS, @object
+.align 16
+.local EMPTY_STR
+.type EMPTY_STR, @object
 EMPTY_STR:
     .zero 1
-    .type EMPTY_STR, @object
 #
+.align 16
+.local DEBUG_LU
+.type DEBUG_LU, @object
 DEBUG_LU:
     .asciz "%lu\n"
-    .type DEBUG_LU, @object
+.align 16
+.local DEBUG_S
+.type DEBUG_S, @object
 DEBUG_S:
     .asciz "%s\n"
-    .type DEBUG_S, @object
+.align 16
+.local DEBUG_F
+.type DEBUG_F, @object
+DEBUG_F:
+    .asciz "%f\n"
+.align 16
+.local DEBUG_X
+.type DEBUG_X, @object
+DEBUG_X:
+    .asciz "%x\n"
+.align 16
+.local DEBUG_P
+.type DEBUG_p, @object
+DEBUG_P:
+    .asciz "%p\n"
+
+/////////////////////////////////////////////////////////////////////////////////
+.section .bss
+
+.align 16
+.type gMaxAnisotropy, @object
+.lcomm gMaxAnisotropy, 4
+# or
+# .local gMaxAnisotropy
+# .type gMaxAnisotropy, @object
+# .comm gMaxAnisotropy, 4, 16
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -54,19 +89,21 @@ DEBUG_S:
     call *\n@gotpcrel(%rip)
 .endm
 
-.type assert, @function
 .align 16
+.type assert, @function
 assert:
-    // input is in eax for optimization's sake
-    testl %eax, %eax
+    endbr64
+    testl %eax, %eax # input is in eax for optimization's sake
     jnz .assert.ret
     callxt abort
 .assert.ret:
     ret
 
-.type loop, @function
 .align 16
+.type loop, @function
 loop:
+    endbr64
+
     # 8 - window, 128 - event, 8 - ticks, 8 from each call - so additional 8 for 16-alignment
     LOOP_STACK = 152
     subq $LOOP_STACK, %rsp
@@ -122,9 +159,21 @@ loop:
     addq $LOOP_STACK, %rsp
     ret
 
-.global main
-.type main, @function
 .align 16
+.type debugCallback, @function
+debugCallback:
+    endbr64
+    popq %rax # unused 7th argument
+
+    leaq DEBUG_S(%rip), %rdi
+    movq %r9, %rsi
+    callxt printf
+
+    ret
+
+.align 16
+.type main, @function
+.global main
 main:
     endbr64
     subq $24, %rsp # 0() window, 8() glContext, 16() padding; 16 + 8 + call = 16-aligned
@@ -182,29 +231,44 @@ main:
     call assert
     movq %rax, 8(%rsp) # glContext
 
-    movl $1, glewExperimental(%rip)
-    callxt glewInit
-    
-    testl %eax, %eax # GLEW_OK=0
-    jz .main.glewInitOk
-
-    cmpl $4, %eax # GLEW_ERROR_NO_GLX_DISPLAY
-    je .main.glewInitOk
-
-    xorl %eax, %eax
-    call assert
-.main.glewInitOk:
-
     xorl %edi, %edi
     xorl %esi, %esi
     movl $WIDTH, %edx
     movl $HEIGHT, %ecx
     callxt glViewport
 
+    movl $0x92e0, %edi # GL_DEBUG_OUTPUT
+    callxt glEnable
+    movl $0x8242, %edi # GL_DEBUG_OUTPUT_SYNCHRONOUS
+    callxt glEnable
+    leaq debugCallback(%rip), %rdi
+    callxt glDebugMessageCallback
+
+    movl $0x809d, %edi # GL_MULTISAMPLE
+    callxt glEnable
+    movl $0x809e, %edi # GL_SAMPLE_ALPHA_TO_COVERAGE
+    callxt glEnable
+
+    movl $0xbe2, %edi # GL_BLEND
+    callxt glEnable
+    movl $0x302, %edi # GL_SRC_ALPHA
+    movl $0x303, %esi # GL_ONE_MINUS_SRC_ALPHA
+    callxt glBlendFunc
+
     movl $1, %edi
     callxt SDL_GL_SetSwapInterval
     call assert
 
+    movl $0x84ff, %edi # GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+    leaq gMaxAnisotropy(%rip), %rsi
+    callxt glGetFloatv
+
+    #
+    leaq DEBUG_P(%rip), %rdi
+    leaq gMaxAnisotropy(%rip), %rsi
+    callxt printf
+    #
+    
     movq (%rsp), %rdi
     call loop
 
