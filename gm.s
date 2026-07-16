@@ -61,6 +61,27 @@ BOOTSTRAP_QUAD_INDICES_SIZE = (. - BOOTSTRAP_QUAD_INDICES)
 #
 
 .align 16
+.local TEST_VERTEX
+.type TEST_VERTEX, @object
+TEST_VERTEX:
+    .ascii "#version 460 core\n"
+    .ascii "void main() {\n"
+    .ascii "gl_Position = vec4(0);\n"
+    .ascii "}\n"
+    .zero 1
+
+.align 16
+.local TEST_FRAGMENT
+.type TEST_FRAGMENT, @object
+TEST_FRAGMENT:
+    .ascii "#version 460 core\n"
+    .ascii "out vec4 oColor;\n"
+    .ascii "void main() {\n"
+    .ascii "oColor = vec4(0);\n"
+    .ascii "}\n"
+    .zero 1
+
+.align 16
 .local DEBUG_LU
 .type DEBUG_LU, @object
 DEBUG_LU:
@@ -127,8 +148,8 @@ assert: # first parameter int is in the eax for optimization's sake
 bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float[] vertices
     endbr64
 
-    BOOTSTRAP_QUAD_STACK = 48
-    subq $BOOTSTRAP_QUAD_STACK, %rsp # 3 * 8 int* + 4 int + 8 float* + 12 padding
+    BOOTSTRAP_QUAD_STACK = 40
+    subq $BOOTSTRAP_QUAD_STACK, %rsp # 3 * 8 int* + 4 int + 8 float* + 4 padding
 
     movq %rdi, (%rsp)
     movq %rsi, 8(%rsp)
@@ -192,8 +213,8 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
 makeShaders: # returns uint program; char* vertex, char* fragment
     endbr64
 
-    MAKE_SHADERS_STACK = 32
-    subq $MAKE_SHADERS_STACK, %rsp # 2 * 8 char* + 4 * 4 int + 0 padding
+    MAKE_SHADERS_STACK = 40
+    subq $MAKE_SHADERS_STACK, %rsp # 2 * 8 char* + 4 * 4 int + 8 padding so + another 8 from calls it would be 16-aligned
     # 0() vertex, 8() fragment, 16() vertexShader, 20() fragmentShader, 24() program, 28() success
     
     movq %rdi, (%rsp)
@@ -308,7 +329,18 @@ loop:
     subq $LOOP_STACK, %rsp
     # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event
     movq %rdi, (%rsp)
-    
+
+    # TODO: debug:
+    leaq TEST_VERTEX(%rip), %rdi
+    leaq TEST_FRAGMENT(%rip), %rsi
+    call makeShaders
+    leaq DEBUG_LU(%rip), %rdi
+    movl %eax, %esi
+    callxt printf
+    movl %esi, %edi
+    callxt glDeleteProgram
+    # TODO: :debug
+
 .loop.infiniteLoop:
     callxt SDL_GetTicks
     movq %rax, 8(%rsp)
@@ -364,7 +396,7 @@ loop:
 .type debugCallback, @function
 debugCallback:
     endbr64
-    popq %rax # unused 7th argument
+    popq %rax # unused 7th argument and to substract 8 from rsp so when the call to printf substract 8 more bytes it will be 16-aligned
 
     leaq DEBUG_S(%rip), %rdi
     movq %r9, %rsi
