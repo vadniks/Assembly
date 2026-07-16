@@ -5,24 +5,18 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, mathematics,
-//     as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in GNU Assembly(er), 
-//     and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C source. This program 
-//     is basically a tiny image manipulation program with all the necessary features to create meme-like images via code - the 
-//     lowest level possible! The features include: render of various sized textures of different images, text render, 
-//     arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing effects, 
-//     result saving to file with image container encoding.
-// Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL (OpenGL 4.6 Core), GLEW
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
+//     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
+//     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing 
+//     effects, result saving to file with image container encoding.
+// Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated July 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// compile: as -o gm.o gm.s
-// link: gcc -pie -z relro -z now -o gm gm.o
-// compile, link, run: as -o gm.o gm.s && gcc -s -pie -z relro -z now -lSDL3 -lGL -lGLEW -o gm gm.o && ./gm 
-// build via ninja
-// --> build in one go: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now gm.s -lSDL3 -lGL -lGLEW -o gm
-// GLEW appears to be unnecessary in assembly - calling GL dirrectly
-// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now gm.s -lSDL3 -lSDL3_ttf -lGL -o gm
+// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lGL gm.s -o gm
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
@@ -35,25 +29,37 @@ OBJECTS = 3
 .align 16
 .local SDL_HINT_VIDEO_DRIVER
 .type SDL_HINT_VIDEO_DRIVER, @object
-SDL_HINT_VIDEO_DRIVER:
-    .asciz "SDL_VIDEO_DRIVER"
+SDL_HINT_VIDEO_DRIVER: .asciz "SDL_VIDEO_DRIVER"
+
 .align 16
 .local VIDEO_DRIVERS
 .type VIDEO_DRIVERS, @object
-VIDEO_DRIVERS:
-    .asciz "wayland,x11"
+VIDEO_DRIVERS: .asciz "wayland,x11"
+
 .align 16
 .local EMPTY_STR
 .type EMPTY_STR, @object
-EMPTY_STR:
-    .zero 1
+EMPTY_STR: .zero 1
+
 .align 16
 .local FONT
 .type FONT, @object
-FONT:
-    .asciz "font.ttf"
+FONT: .asciz "font.ttf"
+
+.align 16
+.local BOOTSTRAP_QUAD_INDICES
+.type BOOTSTRAP_QUAD_INDICES, @object
+BOOTSTRAP_QUAD_INDICES:
+    .float 0.0
+    .float 1.0
+    .float 3.0
+    .float 1.0
+    .float 2.0
+    .float 3.0
+BOOTSTRAP_QUAD_INDICES_SIZE = (. - BOOTSTRAP_QUAD_INDICES)
 
 #
+
 .align 16
 .local DEBUG_LU
 .type DEBUG_LU, @object
@@ -83,13 +89,21 @@ DEBUG_P:
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
 
+.local gFont
+.type gFont, @object
+.comm gFont, 8, 16
+
 .local gMaxAnisotropy
 .type gMaxAnisotropy, @object
 .comm gMaxAnisotropy, 4, 16
 
-.local gFont
-.type gFont, @object
-.comm gFont, 8, 16
+# typedef struct {
+#     Type type;
+#     GLuint vao, program;
+# } Object;
+.local gObjects
+.type gObjects, @object
+.comm gObjects, 24, 16 # <Object*>; 8 * 3
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -100,12 +114,188 @@ DEBUG_P:
 
 .align 16
 .type assert, @function
-assert:
+assert: # first parameter int is in the eax for optimization's sake
     endbr64
-    testl %eax, %eax # input is in eax for optimization's sake
+    testl %eax, %eax
     jnz .assert.ret
     callxt abort
 .assert.ret:
+    ret
+
+.align 16
+.type bootstrapQuad, @function
+bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float[] vertices
+    endbr64
+
+    BOOTSTRAP_QUAD_STACK = 48
+    subq $BOOTSTRAP_QUAD_STACK, %rsp # 3 * 8 int* + 4 int + 8 float* + 12 padding
+
+    movq %rdi, (%rsp)
+    movq %rsi, 8(%rsp)
+    movq %rdx, 16(%rsp)
+    movl %ecx, 24(%rsp)
+    movq %r8, 28(%rsp)
+
+    //
+    
+    movl $1, %edi
+    movq (%rsp), %rsi
+    callxt glCreateVertexArrays
+    movq (%rsp), %rax
+    movl (%rax), %eax
+    call assert
+
+    //
+    
+    movl $1, %edi
+    movq 8(%rsp), %rsi
+    callxt glCreateBuffers
+    movq 8(%rsp), %rax
+    movl (%rax), %eax
+    call assert
+
+    movq 8(%rsp), %rdi
+    movl (%rdi), %edi
+    movl 24(%rsp), %esi
+    movq 28(%rsp), %rdx
+    xorl %ecx, %ecx
+    callxt glNamedBufferStorage
+
+    //
+
+    movl $1, %edi
+    movq 16(%rsp), %rsi
+    callxt glCreateBuffers
+    movq 16(%rsp), %rax
+    movl (%rax), %eax
+    call assert
+
+    movl 16(%rsp), %edi
+    movl $BOOTSTRAP_QUAD_INDICES_SIZE, %esi
+    leaq BOOTSTRAP_QUAD_INDICES(%rip), %rdx
+    xorl %ecx, %ecx
+    callxt glNamedBufferStorage
+
+    movq (%rsp), %rdi
+    movl (%rdi), %edi
+    movq 16(%rsp), %rsi
+    movl (%rsi), %esi
+    callxt glVertexArrayElementBuffer
+
+    //
+    
+    addq $BOOTSTRAP_QUAD_STACK, %rsp
+    ret
+
+.align 16
+.type makeShaders, @function
+makeShaders: # returns uint program; char* vertex, char* fragment
+    endbr64
+
+    MAKE_SHADERS_STACK = 32
+    subq $MAKE_SHADERS_STACK, %rsp # 2 * 8 char* + 4 * 4 int + 0 padding
+    # 0() vertex, 8() fragment, 16() vertexShader, 20() fragmentShader, 24() program, 28() success
+    
+    movq %rdi, (%rsp)
+    movq %rsi, 8(%rsp)
+    movl $0, 16(%rsp)
+    movl $0, 20(%rsp)
+    movl $0, 24(%rsp)
+    movl $0, 28(%rsp)
+
+    //
+    
+    movl $0x8b31, %edi # GL_VERTEX_SHADER
+    callxt glCreateShader
+    call assert
+    movl %eax, 16(%rsp)
+
+    movl 16(%rsp), %edi
+    movl $1, %esi
+    leaq (%rsp), %rdx
+    xorl %ecx, %ecx
+    callxt glShaderSource
+
+    movl 16(%rsp), %edi
+    callxt glCompileShader
+
+    movl 16(%rsp), %edi
+    movl $0x8b81, %esi # GL_COMPILE_STATUS
+    leaq 28(%rsp), %rdx
+    callxt glGetShaderiv
+    movl 28(%rsp), %eax
+    call assert
+
+    //
+
+    movl $0x8b30, %edi # GL_FRAGMENT_SHADER
+    callxt glCreateShader
+    call assert
+    movl %eax, 20(%rsp)
+
+    movl 20(%rsp), %edi
+    movl $1, %esi
+    leaq 8(%rsp), %rdx
+    xorl %ecx, %ecx
+    callxt glShaderSource
+
+    movl 20(%rsp), %edi
+    callxt glCompileShader
+
+    movl 20(%rsp), %edi
+    movl $0x8b81, %esi # GL_COMPILE_STATUS
+    leaq 28(%rsp), %rdx
+    callxt glGetShaderiv
+    movl 28(%rsp), %eax
+    call assert
+
+    //
+
+    callxt glCreateProgram
+    call assert
+    movl %eax, 24(%rsp)
+
+    movl 24(%rsp), %edi
+    movl 16(%rsp), %esi
+    callxt glAttachShader
+
+    movl 24(%rsp), %edi
+    movl 20(%rsp), %esi
+    callxt glAttachShader
+
+    movl 24(%rsp), %edi
+    callxt glLinkProgram
+
+    //
+
+    movl 24(%rsp), %edi
+    callxt glValidateProgram
+
+    movl 24(%rsp), %edi
+    movl $0x8b82, %esi # GL_LINK_STATUS
+    leaq 28(%rsp), %rdx
+    callxt glGetProgramiv
+    movl 28(%rsp), %eax
+    call assert
+
+    //
+
+    movl 20(%rsp), %edi
+    callxt glDeleteShader
+    movl 16(%rsp), %edi
+    callxt glDeleteShader
+
+    //
+
+    movl 24(%rsp), %eax # return program
+    addq $MAKE_SHADERS_STACK, %rsp
+    ret
+    
+.align 16
+.type render, @function
+render:
+    endbr64
+    nop
     ret
 
 .align 16
@@ -118,7 +308,7 @@ loop:
     subq $LOOP_STACK, %rsp
     # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event
     movq %rdi, (%rsp)
-
+    
 .loop.infiniteLoop:
     callxt SDL_GetTicks
     movq %rax, 8(%rsp)
@@ -132,6 +322,8 @@ loop:
 
     movl $0x4000, %edi
     callxt glClear
+
+    call render
 
     movq (%rsp), %rdi
     callxt SDL_GL_SwapWindow
@@ -207,6 +399,8 @@ main:
     callxt SDL_Init
     call assert
 
+    //
+
     callxt TTF_Init
     call assert
 
@@ -225,6 +419,8 @@ main:
     callxt TTF_SetFontSizeDPI
     call assert
 
+    //
+    
     movl $17, %edi # SDL_GL_CONTEXT_MAJOR_VERSION
     movl $4, %esi
     callxt SDL_GL_SetAttribute
@@ -254,6 +450,8 @@ main:
     callxt SDL_GL_SetAttribute
     call assert
 
+    //
+    
     leaq EMPTY_STR(%rip), %rdi
     movl $WIDTH, %esi
     movl $HEIGHT, %edx
@@ -262,16 +460,22 @@ main:
     call assert
     movq %rax, (%rsp) # window
 
+    //
+
     movq (%rsp), %rdi
     callxt SDL_GL_CreateContext
     call assert
     movq %rax, 8(%rsp) # glContext
+
+    //
 
     xorl %edi, %edi
     xorl %esi, %esi
     movl $WIDTH, %edx
     movl $HEIGHT, %ecx
     callxt glViewport
+
+    //
 
     movl $0x92e0, %edi # GL_DEBUG_OUTPUT
     callxt glEnable
@@ -280,27 +484,39 @@ main:
     leaq debugCallback(%rip), %rdi
     callxt glDebugMessageCallback
 
+    //
+    
     movl $0x809d, %edi # GL_MULTISAMPLE
     callxt glEnable
     movl $0x809e, %edi # GL_SAMPLE_ALPHA_TO_COVERAGE
     callxt glEnable
 
+    //
+    
     movl $0xbe2, %edi # GL_BLEND
     callxt glEnable
     movl $0x302, %edi # GL_SRC_ALPHA
     movl $0x303, %esi # GL_ONE_MINUS_SRC_ALPHA
     callxt glBlendFunc
 
+    //
+    
     movl $1, %edi
     callxt SDL_GL_SetSwapInterval
     call assert
 
+    //
+    
     movl $0x84ff, %edi # GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
     leaq gMaxAnisotropy(%rip), %rsi
     callxt glGetFloatv
+
+    //
     
     movq (%rsp), %rdi
     call loop
+
+    //
 
     leaq 8(%rsp), %rdi # glContext
     callxt SDL_GL_DestroyContext
@@ -309,12 +525,18 @@ main:
     movq (%rsp), %rdi # window
     callxt SDL_DestroyWindow
 
+    //
+
     movq gFont(%rip), %rdi
     callxt TTF_CloseFont
     callxt TTF_Quit
 
+    //
+
     callxt SDL_Quit
 
+    //
+
+    xorl %eax, %eax # return 0
     addq $24, %rsp
-    xorl %eax, %eax
     ret
