@@ -402,6 +402,7 @@ debugCallback:
     movq %r9, %rsi
     callxt printf
 
+    popq %rax # revert to free the stack memory
     ret
 
 .align 16
