@@ -334,10 +334,12 @@ loop:
     leaq TEST_VERTEX(%rip), %rdi
     leaq TEST_FRAGMENT(%rip), %rsi
     call makeShaders
+    pushq %rax
     leaq DEBUG_LU(%rip), %rdi
     movl %eax, %esi
+    movb $0, %al
     callxt printf
-    movl %esi, %edi
+    popq %rdi
     callxt glDeleteProgram
     # TODO: :debug
 
@@ -396,13 +398,13 @@ loop:
 .type debugCallback, @function
 debugCallback:
     endbr64
-    popq %rax # unused 7th argument and to substract 8 from rsp so when the call to printf substract 8 more bytes it will be 16-aligned
+    # popq %rax # unused 7th argument and to substract 8 from rsp so when the call to printf substract 8 more bytes it will be 16-aligned
 
     leaq DEBUG_S(%rip), %rdi
     movq %r9, %rsi
+    movb $0, %al # zero xmm* registers used
     callxt printf
 
-    popq %rax # revert to free the stack memory
     ret
 
 .align 16
@@ -411,16 +413,27 @@ debugCallback:
 main:
     endbr64
     subq $24, %rsp # 0() window, 8() glContext, 16() padding; 16 + 8 + call = 16-aligned
-    xorq %rax, %rax
 
+    # debug:
+    leaq VIDEO_DRIVERS(%rip), %r9
+    call debugCallback
     #
-    # leaq DEBUG_P(%rip), %rdi
-    # leaq gMaxAnisotropy(%rip), %rsi
-    # callxt printf
-    # leaq DEBUG_P(%rip), %rdi
-    # leaq gFont(%rip), %rsi
-    # callxt printf
-    #
+    movl $135, %eax # personality
+    movl $0x0007, %edi # PER_XENIX (stripped)
+    orl $0x4000000, %edi # STICKY_TIMEOUTS
+    orl $0x1000000, %edi # SHORT_INODE
+    syscall
+    testl %eax, %eax
+    jns .main.personalityOk
+    xorl %eax, %eax
+    call assert
+.main.personalityOk:
+    xchgl %eax, %eax
+    leaq DEBUG_X(%rip), %rdi
+    movl %eax, %esi
+    movb $0, %al
+    callxt printf
+    # :debug
 
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
     leaq VIDEO_DRIVERS(%rip), %rsi
