@@ -118,13 +118,24 @@ DEBUG_P:
 .type gMaxAnisotropy, @object
 .comm gMaxAnisotropy, 4, 16
 
+# pragma pack for structs = no paddings
+
+# typedef enum : byte {TYPE_TEXQUAD, TYPE_LINE} Type; // size = 1
+
 # typedef struct {
 #     Type type;
 #     GLuint vao, program;
-# } Object;
+# } Object; // size = 1 + 2 * 4 = 9
 .local gObjects
 .type gObjects, @object
 .comm gObjects, 24, 16 # <Object*>; 8 * 3
+
+# typedef struct {
+#     Object; // ms-anon-structure-tag = copies the whole structure
+#     GLfloat x, y;
+#     GLuint w, h, vbo, ebo, texture;
+#     bool clip;
+# } Texquad; // size = 9 + 2 * 4 + 5 * 4 + 1 = 38
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -138,9 +149,9 @@ DEBUG_P:
 assert: # first parameter int is in the eax for optimization's sake
     endbr64
     testl %eax, %eax
-    jnz .assert.ret
+    jnz .Lassert.ret
     callxt abort
-.assert.ret:
+.Lassert.ret:
     ret
 
 .align 16
@@ -311,6 +322,210 @@ makeShaders: # returns uint program; char* vertex, char* fragment
     movl 24(%rsp), %eax # return program
     addq $MAKE_SHADERS_STACK, %rsp
     ret
+
+.align 16
+.type createTexquad, @function
+createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being destroyed here, const float* model
+    endbr64
+
+    # 8 texquad + 8 surface + 8 model + 8 any call = 16 aligned
+    CREATE_TEXQUAD_STACK = 24
+    subq CREATE_TEXQUAD_STACK, %rsp
+
+    movq %rdi, (%rsp)
+    movq %rsi, 8(%rsp)
+    movq %rdx, 16(%rsp)
+    
+    //
+    
+    testq %rsi, %rsi
+    jz .LcreateTexquad.bootstrap # surface == null 
+
+    //
+
+    movq (%rsp), %rbp
+    addq $33, %rbp # &texquad->texture
+
+    movl $0xde1, %edi # GL_TEXTURE_2D
+    movl $1, %esi
+    movq %rbp, %rdx
+    callxt glCreateTextures
+    movl (%rbp), %eax
+    call assert
+
+    movl (%rbp), %ebp # texquad->texture
+
+    movl %ebp, %edi
+    movl $0x2802, %esi # GL_TEXTURE_WRAP_S
+    movl $0x812f, %edx # GL_CLAMP_TO_EDGE
+    callxt glTextureParameteri
+
+    movl %ebp, %edi
+    movl $0x2803, %esi # GL_TEXTURE_WRAP_T
+    movl $0x812f, %edx # GL_CLAMP_TO_EDGE
+    callxt glTextureParameteri
+
+    movl %ebp, %edi
+    movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
+    movl $0x2703, %edx # GL_LINEAR_MIPMAP_LINEAR
+    callxt glTextureParameteri
+
+    movl %ebp, %edi
+    movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
+    movl $0x2601, %edx # GL_LINEAR
+    callxt glTextureParameteri
+
+    movl %ebp, %edi
+    movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
+    movss gMaxAnisotropy(%rip), %xmm0
+    callxt glTextureParameteri
+
+    movl %ebp, %edi
+    movl $1, %esi
+    movl $0x8058, %edx # GL_RGBA8
+    movl 8+8(%rsp), %ecx # surface->w
+    movl 8+12(%rsp), %r8d # surface->h
+    callxt glTextureStorage2D
+
+    movl %ebp, %edi
+    xorl %esi, %esi
+    xorl %esi, %edx
+    xorl %esi, %ecx
+    movl 8+8(%rsp), %r8d # surface->w
+    movl 8+12(%rsp), %r9d # surface->h
+    pushq $24 # surface->pixels # 9th
+    pushq $0x1401 # GL_UNSIGNED_BYTE # 8th
+    pushq $0x1908 # GL_RGBA # 7th
+    callxt glTextureSubImage2D # arguments go on stack in reverse order
+
+    movl %ebp, %edi
+    callxt glGenerateTextureMipmap
+
+    movq 8(%rsp), %rdi
+    callxt SDL_DestroySurface
+
+.LcreateTexquad.bootstrap:
+
+    CREATE_TEXQUAD_STACK2 = 80 # also add CREATE_TEXQUAD_STACK from previous allocation
+    subq $CREATE_TEXQUAD_STACK2, %rsp # 8 bytes padding to align the vertices themselves + 64 bytes for actual vertices + 8 bytes padding so that a call would add another 8 to complete 16-alignment
+
+    movq (%rsp), %rdi
+    addq $9, %rdi
+    movl (%rdi), %edi # texquad->x float
+    #
+    movq (%rsp), %rsi
+    addq $13, %rsi
+    movl (%rsi), %esi # texquad->y float
+    #
+    movq (%rsp), %rdx
+    addq $17, %rdx
+    movl (%rdx), %edx # texquad->w long
+    #
+    movq (%rsp), %rcx
+    addq $21, %rcx
+    movl (%rcx), %ecx # texquad->h long
+
+    movd %edi, %xmm0 # TODO: make packed floats calc - parallel
+    cvtsi2ssl %edx, %xmm1
+    addss %xmm0, %xmm1 # x + w
+    movd %xmm1, CREATE_TEXQUAD_STACK+0(%rsp)
+
+    movd %esi, %xmm0
+    cvtsi2ssl %ecx, %xmm2
+    addss %xmm0, %xmm2 # y + h
+    movd %xmm2, CREATE_TEXQUAD_STACK+4(%rsp)
+
+    movl $0x3f800000, CREATE_TEXQUAD_STACK+8(%rsp) # 1.f
+
+    movl $0x3f800000, CREATE_TEXQUAD_STACK+12(%rsp) # 1.f
+    #
+    movd %xmm1, CREATE_TEXQUAD_STACK+16(%rsp)
+
+    movl %esi, CREATE_TEXQUAD_STACK+20(%rsp)
+
+    movl $1, CREATE_TEXQUAD_STACK+24(%rsp)
+
+    movl $0, CREATE_TEXQUAD_STACK+28(%rsp)
+    #
+    movl %edi, CREATE_TEXQUAD_STACK+32(%rsp)
+    
+    movl %esi, CREATE_TEXQUAD_STACK+36(%rsp)
+
+    movl $0, CREATE_TEXQUAD_STACK+40(%rsp)
+
+    movl $0, CREATE_TEXQUAD_STACK+44(%rsp)
+    #
+    movl %edi, CREATE_TEXQUAD_STACK+48(%rsp)
+
+    movd %xmm2, CREATE_TEXQUAD_STACK+52(%rsp)
+
+    movl $0, CREATE_TEXQUAD_STACK+56(%rsp)
+
+    movl $1, CREATE_TEXQUAD_STACK+60(%rsp)
+
+    movq (%rsp), %rax
+    movq %rax, %rdi
+    addq $1, %rdi # &texquad->vao
+    movq %rax, %rsi
+    addq $25, %rsi # &texquad->vbo
+    movq %rax, %rdx
+    addq $29, %rdx # &texquad->ebo
+    movl $64, %ecx # sizeof(vertices)
+    leaq CREATE_TEXQUAD_STACK(%rsp), %r8 # &vertices
+    call bootstrapQuad
+
+    addq $CREATE_TEXQUAD_STACK2, %rsp
+
+    movq (%rsp), %rax
+    movq %rax, %rdi
+    addq $1, %rdi
+    movl (%rdi), %edi # texquad->vao
+    movl %edx, %ebp
+    xorl %esi, %esi
+    movq %rax, %rdx
+    addq $25, %rdx
+    movl (%rdx), %edx # texquad->vbo
+    xorl %ecx, %ecx
+    movl $16, %r8d
+    callxt glVertexArrayVertexBuffer
+    
+    //
+
+    movl %ebp, %edi # texquad->vao
+    xorl %esi, %esi
+    movl $4, %edx
+    movl $0x1406, %ecx # GL_FLOAT
+    xorl %r8d, %r8d
+    xorl %r9d, %r9d
+    callxt glVertexArrayAttribFormat
+
+    movl %ebp, %edi # texquad->vao
+    xorl %esi, %esi
+    xorl %edx, %edx
+    callxt glVertexArrayAttribBinding
+
+    movl %ebp, %edi # texquad->vao
+    xorl %esi, %esi
+    callxt glEnableVertexArrayAttrib
+
+    //
+
+    leaq TEXQUAD_VERTEX_SHADER(%rip), %rdi
+    leaq TEXQUAD_FRAGMENT_SHADER(%rip), %rsi
+    call makeShaders
+    movq (%rsp), %rdi
+    addq $5, %rdi # &texquad->program
+    movl %eax, (%rdi)
+
+    //
+
+    movq (%rsp), %rax # TODO: packed floats to calculate 2 results in parallel
+    addq $17, %rax # &texquad->w
+    cvtsi2ss (%rax), %xmm0
+    divss $0x01, %xmm0
+    
+    addq CREATE_TEXQUAD_STACK, %rsp    
+    ret
     
 .align 16
 .type render, @function
@@ -330,24 +545,11 @@ loop:
     # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event
     movq %rdi, (%rsp)
 
-    # TODO: debug:
-    leaq TEST_VERTEX(%rip), %rdi
-    leaq TEST_FRAGMENT(%rip), %rsi
-    call makeShaders
-    pushq %rax
-    leaq DEBUG_LU(%rip), %rdi
-    movl %eax, %esi
-    movb $0, %al
-    callxt printf
-    popq %rdi
-    callxt glDeleteProgram
-    # TODO: :debug
-
-.loop.infiniteLoop:
+.Lloop.infiniteLoop:
     callxt SDL_GetTicks
     movq %rax, 8(%rsp)
 
-    movl $0x3f800000, %eax # IEEE-754 floating point hex representation = 1.f
+    movl $0x3f800000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
     movd %eax, %xmm0
     movd %eax, %xmm1
     movd %eax, %xmm2
@@ -363,34 +565,34 @@ loop:
     callxt SDL_GL_SwapWindow
     call assert
 
-.loop.eventsLoop:
+.Lloop.eventsLoop:
     leaq 16(%rsp), %rdi
     callxt SDL_PollEvent
     testl %eax, %eax
-    jz .loop.eventsLoopEnd
+    jz .Lloop.eventsLoopEnd
 
     cmpl $0x100, 16(%rsp) # event.type SDL_EVENT_QUIT
-    je .loop.infiniteLoopEnd
+    je .Lloop.infiniteLoopEnd
 
     cmpl $0x300, 16(%rsp) # event.type SDL_EVENT_KEY_DOWN
-    jne .loop.eventsLoop
+    jne .Lloop.eventsLoop
     cmpl $0x71, 16+28(%rsp) # event.key.key SDLK_Q
-    je .loop.infiniteLoopEnd
+    je .Lloop.infiniteLoopEnd
 
-    jmp .loop.eventsLoop
+    jmp .Lloop.eventsLoop
 
-.loop.eventsLoopEnd:
+.Lloop.eventsLoopEnd:
     callxt SDL_GetTicks # rax = elapsed
     subq 8(%rsp), %rax
     cmpq $UPDATE_PERIOD, %rax
-    ja .loop.infiniteLoop
+    ja .Lloop.infiniteLoop
 
     movl $UPDATE_PERIOD, %edi
     subl %eax, %edi
     callxt SDL_Delay
-    jmp .loop.infiniteLoop
+    jmp .Lloop.infiniteLoop
 
-.loop.infiniteLoopEnd:
+.Lloop.infiniteLoopEnd:
     addq $LOOP_STACK, %rsp
     ret
 
@@ -413,27 +615,6 @@ debugCallback:
 main:
     endbr64
     subq $24, %rsp # 0() window, 8() glContext, 16() padding; 16 + 8 + call = 16-aligned
-
-    # debug:
-    leaq VIDEO_DRIVERS(%rip), %r9
-    call debugCallback
-    #
-    movl $135, %eax # personality
-    movl $0x0007, %edi # PER_XENIX (stripped)
-    orl $0x4000000, %edi # STICKY_TIMEOUTS
-    orl $0x1000000, %edi # SHORT_INODE
-    syscall
-    testl %eax, %eax
-    jns .main.personalityOk
-    xorl %eax, %eax
-    call assert
-.main.personalityOk:
-    xchgl %eax, %eax
-    leaq DEBUG_X(%rip), %rdi
-    movl %eax, %esi
-    movb $0, %al
-    callxt printf
-    # :debug
 
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
     leaq VIDEO_DRIVERS(%rip), %rsi
