@@ -58,6 +58,16 @@ BOOTSTRAP_QUAD_INDICES:
     .float 3.0
 BOOTSTRAP_QUAD_INDICES_SIZE = (. - BOOTSTRAP_QUAD_INDICES)
 
+.align 16
+.local UNIFORM_CLIP
+.type UNIFORM_CLIP, @object
+UNIFORM_CLIP: .asciz "uClip"
+
+.align 16
+.local UNIFORM_MODEL
+.type UNIFORM_MODEL, @object
+UNIFORM_MODEL: .asciz "uModel"
+
 #
 
 .align 16
@@ -406,62 +416,52 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
 
 .LcreateTexquad.bootstrap:
 
-    CREATE_TEXQUAD_STACK2 = 80 # also add CREATE_TEXQUAD_STACK from previous allocation
-    subq $CREATE_TEXQUAD_STACK2, %rsp # 8 bytes padding to align the vertices themselves + 64 bytes for actual vertices + 8 bytes padding so that a call would add another 8 to complete 16-alignment
+    pxor %xmm0, %xmm0
+    pxor %xmm1, %xmm1
 
     movq (%rsp), %rdi
     addq $9, %rdi
-    movl (%rdi), %edi # texquad->x float
+    pinsrd $0, (%rdi), %xmm0 # texquad->x float
     #
     movq (%rsp), %rsi
     addq $13, %rsi
-    movl (%rsi), %esi # texquad->y float
+    pinsrd $1, (%rsi), %xmm0 # texquad->y float
     #
     movq (%rsp), %rdx
     addq $17, %rdx
-    movl (%rdx), %edx # texquad->w long
+    pinsrd $0, (%rdx), %xmm1 # texquad->w long starting at the lower 4 bytes of the lower 8 bytes
     #
     movq (%rsp), %rcx
     addq $21, %rcx
-    movl (%rcx), %ecx # texquad->h long
+    pinsrd $1, (%rcx), %xmm1 # texquad->h long starting at the upper 4 bytes of the lower 8 bytes
+    
+    cvtdq2ps %xmm1, %xmm1 # convert longwords in xmm1 to single precision floats and store them in xmm1
+    addps %xmm0, %xmm1 # sum all floats at once, store them in xmm1
 
-    movd %edi, %xmm0 # TODO: make packed floats calc - parallel
-    cvtsi2ssl %edx, %xmm1
-    addss %xmm0, %xmm1 # x + w
-    movd %xmm1, CREATE_TEXQUAD_STACK+0(%rsp)
+    # TODO: replace movd with vmovsd
 
-    movd %esi, %xmm0
-    cvtsi2ssl %ecx, %xmm2
-    addss %xmm0, %xmm2 # y + h
-    movd %xmm2, CREATE_TEXQUAD_STACK+4(%rsp)
+    CREATE_TEXQUAD_STACK2 = 80 # also add CREATE_TEXQUAD_STACK from previous allocation
+    subq $CREATE_TEXQUAD_STACK2, %rsp # 8 bytes padding to align the vertices themselves + 64 bytes for actual vertices + 8 bytes padding so that a call would add another 8 to complete 16-alignment
 
+    pextrd $0, %xmm1, CREATE_TEXQUAD_STACK+0(%rsp) # x + w
+    pextrd $1, %xmm1, CREATE_TEXQUAD_STACK+4(%rsp) # y + h
     movl $0x3f800000, CREATE_TEXQUAD_STACK+8(%rsp) # 1.f
-
     movl $0x3f800000, CREATE_TEXQUAD_STACK+12(%rsp) # 1.f
     #
-    movd %xmm1, CREATE_TEXQUAD_STACK+16(%rsp)
-
-    movl %esi, CREATE_TEXQUAD_STACK+20(%rsp)
-
-    movl $1, CREATE_TEXQUAD_STACK+24(%rsp)
-
-    movl $0, CREATE_TEXQUAD_STACK+28(%rsp)
+    pextrd $0, %xmm1, CREATE_TEXQUAD_STACK+16(%rsp) # x + w
+    pextrd $1, %xmm0, CREATE_TEXQUAD_STACK+20(%rsp) # y
+    movl $0x3f800000, CREATE_TEXQUAD_STACK+24(%rsp) # 1.f
+    movl $0, CREATE_TEXQUAD_STACK+28(%rsp) # 0.f
     #
-    movl %edi, CREATE_TEXQUAD_STACK+32(%rsp)
-    
-    movl %esi, CREATE_TEXQUAD_STACK+36(%rsp)
-
-    movl $0, CREATE_TEXQUAD_STACK+40(%rsp)
-
-    movl $0, CREATE_TEXQUAD_STACK+44(%rsp)
+    pextrd $0, %xmm0, CREATE_TEXQUAD_STACK+32(%rsp) # x
+    pextrd $1, %xmm0, CREATE_TEXQUAD_STACK+36(%rsp) # y
+    movl $0, CREATE_TEXQUAD_STACK+40(%rsp) # 0.f
+    movl $0, CREATE_TEXQUAD_STACK+44(%rsp) # 0.f
     #
-    movl %edi, CREATE_TEXQUAD_STACK+48(%rsp)
-
-    movd %xmm2, CREATE_TEXQUAD_STACK+52(%rsp)
-
-    movl $0, CREATE_TEXQUAD_STACK+56(%rsp)
-
-    movl $1, CREATE_TEXQUAD_STACK+60(%rsp)
+    pextrd $0, %xmm0, CREATE_TEXQUAD_STACK+48(%rsp) # x
+    pextrd $1, %xmm1, CREATE_TEXQUAD_STACK+52(%rsp) # y + h
+    movl $0, CREATE_TEXQUAD_STACK+56(%rsp) # 0.f
+    movl $0x3f800000, CREATE_TEXQUAD_STACK+60(%rsp) # 1.f
 
     movq (%rsp), %rax
     movq %rax, %rdi
@@ -474,7 +474,7 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     leaq CREATE_TEXQUAD_STACK(%rsp), %r8 # &vertices
     call bootstrapQuad
 
-    addq $CREATE_TEXQUAD_STACK2, %rsp
+    addq $CREATE_TEXQUAD_STACK2, %rsp # drop vertices
 
     movq (%rsp), %rax
     movq %rax, %rdi
@@ -516,17 +516,74 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     movq (%rsp), %rdi
     addq $5, %rdi # &texquad->program
     movl %eax, (%rdi)
+    movl %eax, %ebp # texquad->program
 
     //
 
-    movq (%rsp), %rax # TODO: packed floats to calculate 2 results in parallel
-    addq $17, %rax # &texquad->w
-    cvtsi2ss (%rax), %xmm0
-    divss $0x01, %xmm0
+    pxor %xmm0, %xmm0
+
+    movq (%rsp), %rax
+    addq $17, %rax
+    pinsrd $0, (%rax), %xmm0 # texquad->w
+    movq (%rsp), %rax
+    addq $21, %rax
+    pinsrd $1, (%rax), %xmm0 # texquad->h
+
+    movabs $0x4000000040000000, %rax # two 2.f floats in hex (little endian)
+    movq %rax, %xmm1
+
+    cvtdq2ps %xmm0, %xmm0 # convert longwords to floats (4 bytes each)
+    divps %xmm1, %xmm0 # wHalf and hHalf are in the 0-64 bits of xmm0
+
+    movq (%rsp), %rax
+    addq $9, %rax
+    pinsrd $0, (%rax), %xmm1 # texquad->x
+    movq (%rsp), %rax
+    addq $13, %rax
+    pinsrd $1, (%rax), %xmm1 # texquad->y
+    
+    movb 37(%rsp), %al # texquad->clip
+    testb %al, %al
+    jnz .LcreateTexquad.useClip # if texquad->clip = true
+    pxor %xmm1, %xmm1 # vec4(0.f) in xmm1
+    jmp .LcreateTexquad.endClip
+.LcreateTexquad.useClip: # TODO: optimize
+    addps %xmm0, %xmm1 # texquad->x + wHalf, texquad->y + hHalf in xmm1
+    movlhps %xmm0, %xmm1
+.LcreateTexquad.endClip:
+    
+    movl %ebp, %edi # texquad->program
+    leaq UNIFORM_CLIP(%rip), %rsi
+    callxt glGetUniformLocation
+
+    CREATE_TEXQUAD_STACK3 = 56 # also add CREATE_TEXQUAD_STACK from previous allocation
+    subq $CREATE_TEXQUAD_STACK3, %rsp # 24 from previous allocation + 8 alignment + 4 floats + 8 padding + any call = 16-aligned
+    movaps %xmm0, CREATE_TEXQUAD_STACK+8(%rsp)
+
+    movl %ebp, %edi # texquad->program
+    movl %eax, %esi # clip uniform location
+    movl $1, %edx
+    leaq CREATE_TEXQUAD_STACK+8(%rsp), %rcx
+    callxt glProgramUniform4fv
+
+    addq $CREATE_TEXQUAD_STACK3, %rsp
+
+    //
+
+    movl %ebp, %edi # texquad->program
+    leaq UNIFORM_MODEL(%rip), %rsi
+    callxt glGetUniformLocation
+    
+    movl %ebp, %edi # texquad->program
+    movl %eax, %esi # model uniform location
+    movl $1, %edx
+    xorl %ecx, %ecx
+    movq 16(%rsp), %r8 # float* model
+    callxt glProgramUniformMatrix4fv
     
     addq CREATE_TEXQUAD_STACK, %rsp    
     ret
-    
+
 .align 16
 .type render, @function
 render:
