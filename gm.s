@@ -510,8 +510,10 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
 
     //
 
-    leaq TEXQUAD_VERTEX_SHADER(%rip), %rdi
-    leaq TEXQUAD_FRAGMENT_SHADER(%rip), %rsi
+    # leaq TEXQUAD_VERTEX_SHADER(%rip), %rdi
+    leaq TEST_VERTEX(%rip), %rdi
+    # leaq TEXQUAD_FRAGMENT_SHADER(%rip), %rsi
+    leaq TEST_FRAGMENT(%rip), %rsi
     call makeShaders
     movq (%rsp), %rdi
     addq $5, %rdi # &texquad->program
