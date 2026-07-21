@@ -89,6 +89,7 @@ TEST_VERTEX:
     .ascii "gl_Position = vec4(0);\n"
     .ascii "}\n"
     .zero 1
+TEST_VERTEX_SIZE = (. - TEST_VERTEX)
 
 .align 16
 .local TEST_FRAGMENT
@@ -100,6 +101,7 @@ TEST_FRAGMENT:
     .ascii "oColor = vec4(0);\n"
     .ascii "}\n"
     .zero 1
+TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 
 .align 16
 .local DEBUG_LU
@@ -599,10 +601,14 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
 
     //
 
-    # leaq TEXQUAD_VERTEX_SHADER(%rip), %rdi
-    leaq TEST_VERTEX(%rip), %rdi
-    # leaq TEXQUAD_FRAGMENT_SHADER(%rip), %rsi
-    leaq TEST_FRAGMENT(%rip), %rsi
+    # movl $TEXQUAD_VERTEX_SHADER_SIZE, %edi // <-- TODO: replace with the real ones
+    movl $TEST_VERTEX_SIZE, %edi
+    # leaq TEXQUAD_VERTEX_SHADER(%rip), %rsi
+    leaq TEST_VERTEX(%rip), %rsi
+    # movl $TEXQUAD_FRAGMENT_SHADER_SIZE, %edx
+    movl $TEST_FRAGMENT_SIZE, %edx
+    # leaq TEXQUAD_FRAGMENT_SHADER(%rip), %rcx
+    leaq TEST_FRAGMENT(%rip), %rcx
     call makeShaders
     movq (%rsp), %rdi
     addq $5, %rdi # &texquad->program
