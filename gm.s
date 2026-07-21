@@ -16,7 +16,7 @@
 // Version: dated July 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lGL gm.s -o gm
+// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL gm.s -o gm
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
@@ -45,6 +45,11 @@ EMPTY_STR: .zero 1
 .local FONT
 .type FONT, @object
 FONT: .asciz "font.ttf"
+
+.align 16
+.local OUTPUT_IMAGE
+.type OUTPUT_IMAGE, @object
+OUTPUT_IMAGE: .asciz "gmout2.png"
 
 .align 16
 .local BOOTSTRAP_QUAD_INDICES
@@ -165,6 +170,57 @@ assert: # first parameter int is in the eax for optimization's sake
     ret
 
 .align 16
+.type captureCanvas, @function
+captureCanvas:
+    endbr64
+
+    movl $WIDTH, %ebp
+    imull $HEIGHT, %ebp
+    imull $4, %ebp # stack displacement, the result is divisible by 16 already but as we will call smth we need to take additional 8 from any call so for the stack pointer to be 16-aligned we need to add 8
+    addl $8, %ebp # also this is an argument for 7th argument, starts at 0(%rsp)
+    subq %rbp, %rsp # buffer for pixels, starts at 8(%rsp)
+
+    xorl %edi, %edi
+    xorl %esi, %esi
+    movl $WIDTH, %edx
+    movl $HEIGHT, %ecx
+    movl $0x1908, %r8d # GL_RGBA
+    movl $0x1401, %r9d # GL_UNSIGNED_BYTE
+    leaq 8(%rsp), %rax # &buffer{}
+    movq %rax, (%rsp) # buffer addr
+    callxt glReadPixels
+
+    //
+    
+    movl $WIDTH, %edi
+    movl $HEIGHT, %esi
+    movl $0x16762004, %edx # SDL_PIXELFORMAT_RGBA32
+    leaq 8(%rsp), %rcx # &buffer{}
+    movl $WIDTH, %r8d
+    imull $4, %r8d
+    callxt SDL_CreateSurfaceFrom
+    call assert
+    movq %rax, %rbx # SDL_Surface* surface
+
+    movq %rbx, %rdi
+    movl $2, %esi # SDL_FLIP_VERTICAL
+    callxt SDL_FlipSurface
+    call assert
+
+    //
+
+    movq %rbx, %rdi
+    leaq OUTPUT_IMAGE(%rip), %rsi
+    callxt IMG_SavePNG 
+    call assert
+
+    movq %rbx, %rdi
+    callxt SDL_DestroySurface
+    
+    addq %rbp, %rsp
+    ret
+
+.align 16
 .type bootstrapQuad, @function
 bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float[] vertices
     endbr64
@@ -230,7 +286,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     ret
 
 .align 16
-.type makeShaders, @function
+.type makeShaders, @function # ---> TODO: REPLACE WITH SPIR-V PRECOMPILAION <---
 makeShaders: # returns uint program; char* vertex, char* fragment
     endbr64
 
