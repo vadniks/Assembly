@@ -676,6 +676,61 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     ret
 
 .align 16
+.type createTexture, @function
+createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageOrText
+    endbr64
+
+    CREATE_TEXTURE_STACK = 40
+    subq $CREATE_TEXTURE_STACK, %rsp # 3 * 8 void* + 4 int + 12 padding + 8 any call = 16-aligned
+    # 0() imgPathOrText, 8() imageOrText, 12() SDL_Surface* temp, 20() SDL_Surface* converted
+
+    movq %rdi, (%rsp)
+    movl %esi, 8(%rsp)
+    movq $0, 12(%rsp)
+    movq $0, 20(%rsp)
+
+    //
+    
+    testl %esi, %esi # if imgOrText
+    jz .LcreateTexture.text
+    #movq %rdi, %rdi
+    callxt IMG_Load
+    jmp .LcreateTexture.endCondition
+.LcreateTexture.text:
+    movq gFont(%rip), %rdi
+    movq (%rsp), %rsi
+    xorq %rdx, %rdx
+    movl $0xff7f7f7f, %ecx # (SDL_Color) {127, 127, 127, 255}
+    callxt TTF_RenderText_Blended
+.LcreateTexture.endCondition:
+    call assert
+    movq %rax, 12(%rsp) # temp surface
+
+    //
+
+    movq %rax, %rdi # temp surface
+    movl $0x16762004, %esi # SDL_PIXELFORMAT_RGBA32
+    callxt SDL_ConvertSurface
+    call assert
+    movq %rax, 20(%rsp) # converted surface
+
+    movq 12(%rsp), %rdi
+    callxt SDL_DestroySurface
+
+    //
+
+    movq 20(%rsp), %rdi
+    movl $2, %esi # SDL_FLIP_VERTICAL
+    callxt SDL_FlipSurface
+    call assert
+
+    //
+
+    movq 20(%rsp), %rax
+    addq $CREATE_TEXTURE_STACK, %rsp
+    retq
+
+.align 16
 .type render, @function
 render:
     endbr64
