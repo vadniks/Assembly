@@ -737,6 +737,49 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     retq
 
 .align 16
+.type renderTexquad, @function
+renderTexquad: # receives Texquad*
+    endbr64
+    movq %rdi, %rbp # Texquad*
+
+    //
+
+    #movq %rdi, %rdi
+    addq $5, %rdi # &texquad->program
+    callxt glUseProgram
+
+    movl $0x0de1, %edi # GL_TEXTURE_2D
+    movq %rbp, %rsi
+    addq $33, %rsi # &texquad->texture
+    callxt glBindTexture
+
+    movq %rbp, %rdi # ---> TODO: replace all of these with leaq inline calculations <---
+    addq $1, %rdi # &texquad->vao
+    callxt glBindVertexArray
+
+    //
+
+    movl $4, %edi # GL_TRIANGLES
+    movl $6, %esi
+    movl $0x1405, %edx # GL_UNSIGNED_INT
+    xorq %rcx, %rcx
+    callxt glDrawElements
+
+    //
+
+    xorl %edi, %edi
+    callxt glBindVertexArray
+    movl $0x0de1, %edi # GL_TEXTURE_2D
+    xorl %esi, %esi
+    callxt glBindTexture
+    xorl %edi, %edi
+    callxt glUseProgram
+
+    //
+
+    ret
+    
+.align 16
 .type render, @function
 render:
     endbr64
