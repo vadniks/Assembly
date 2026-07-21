@@ -739,7 +739,8 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
 .align 16
 .type renderTexquad, @function
 renderTexquad: # receives Texquad*
-    endbr64 # // ---> TODO: STACK ALIGNMENT <---
+    endbr64
+    subq $8, %rsp # stack alignment (8 + any call = 16)
     movq %rdi, %rbp # Texquad*
 
     //
@@ -775,6 +776,7 @@ renderTexquad: # receives Texquad*
     xorl %edi, %edi
     callxt glUseProgram
 
+    addq $8, %rsp
     ret
 
 .align 16
@@ -782,8 +784,7 @@ renderTexquad: # receives Texquad*
 removeTexquad: # receives Texquad*
     endbr64
     subq $8, %rsp # stack alignment (8 + any call = 16) and temp buffer for ebo and vao
-
-    movq %rdi, %rbp
+    movq %rdi, %rbp # Texquad*
 
     movl $1, %edi
     leaq 33(%rdi), %rsi # &texquad->texture // ---> TODO: make accessing structures' fields like in this function (*) <---
