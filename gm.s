@@ -73,6 +73,11 @@ UNIFORM_CLIP: .asciz "uClip"
 .type UNIFORM_MODEL, @object
 UNIFORM_MODEL: .asciz "uModel"
 
+.align 16
+.local ENTRY_POINT
+.type ENTRY_POINT, @object
+ENTRY_POINT: .asciz "main"
+
 #
 
 .align 16
@@ -175,11 +180,13 @@ captureCanvas:
     endbr64
 
     movl $WIDTH, %ebp
-    imull $HEIGHT, %ebp
+    imull $HEIGHT, %ebp # TODO: calculate inside lea instruction directly
     imull $4, %ebp # stack displacement, the result is divisible by 16 already but as we will call smth we need to take additional 8 from any call so for the stack pointer to be 16-aligned we need to add 8
     addl $8, %ebp # also this is an argument for 7th argument, starts at 0(%rsp)
     subq %rbp, %rsp # buffer for pixels, starts at 8(%rsp)
 
+    //
+    
     xorl %edi, %edi
     xorl %esi, %esi
     movl $WIDTH, %edx
@@ -286,42 +293,49 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     ret
 
 .align 16
-.type makeShaders, @function # ---> TODO: REPLACE WITH SPIR-V PRECOMPILAION <---
-makeShaders: # returns uint program; char* vertex, char* fragment
+.type makeShaders, @function
+makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentSize, char* fragment
     endbr64
 
     MAKE_SHADERS_STACK = 40
-    subq $MAKE_SHADERS_STACK, %rsp # 2 * 8 char* + 4 * 4 int + 8 padding so + another 8 from calls it would be 16-aligned
-    # 0() vertex, 8() fragment, 16() vertexShader, 20() fragmentShader, 24() program, 28() success
-    
-    movq %rdi, (%rsp)
-    movq %rsi, 8(%rsp)
-    movl $0, 16(%rsp)
-    movl $0, 20(%rsp)
+    subq $MAKE_SHADERS_STACK, %rsp # 2 * 4 int + 2 * 8 char* + 4 * 4 int + another 8 from any call would make rsp be 16-aligned
+    # 0() vertexSize, 4() vertex, 12() fragmentSize, 16() fragment, 24() vertexShader, 28() fragmentShader, 32() program, 36() success
+
+    movl %edi, (%rsp)
+    movq %rsi, 4(%rsp)
+    movl %edx, 12(%rsp)
+    movq %rcx, 16(%rsp)
     movl $0, 24(%rsp)
     movl $0, 28(%rsp)
+    movl $0, 32(%rsp)
+    movl $0, 36(%rsp)
 
     //
     
     movl $0x8b31, %edi # GL_VERTEX_SHADER
     callxt glCreateShader
     call assert
-    movl %eax, 16(%rsp)
+    movl %eax, 24(%rsp)
 
-    movl 16(%rsp), %edi
-    movl $1, %esi
-    leaq (%rsp), %rdx
-    xorl %ecx, %ecx
-    callxt glShaderSource
+    movl $1, %edi
+    leaq 24(%rsp), %rsi
+    movl $0x9551, %edx # GL_SHADER_BINARY_FORMAT_SPIR_V
+    movq 4(%rsp), %rcx
+    movl (%rsp), %r8d
+    callxt glShaderBinary
 
-    movl 16(%rsp), %edi
-    callxt glCompileShader
+    movl 24(%rsp), %edi
+    leaq ENTRY_POINT(%rip), %rsi
+    xorl %edx, %edx
+    xorq %rcx, %rcx
+    xorq %r8, %r8
+    callxt glSpecializeShader
 
-    movl 16(%rsp), %edi
+    movl 24(%rsp), %edi
     movl $0x8b81, %esi # GL_COMPILE_STATUS
-    leaq 28(%rsp), %rdx
+    leaq 36(%rsp), %rdx # 36 - not aligned... can be problematic... - nope;)
     callxt glGetShaderiv
-    movl 28(%rsp), %eax
+    movl 36(%rsp), %eax
     call assert
 
     //
@@ -329,63 +343,82 @@ makeShaders: # returns uint program; char* vertex, char* fragment
     movl $0x8b30, %edi # GL_FRAGMENT_SHADER
     callxt glCreateShader
     call assert
-    movl %eax, 20(%rsp)
+    movl %eax, 28(%rsp)
 
-    movl 20(%rsp), %edi
-    movl $1, %esi
-    leaq 8(%rsp), %rdx
-    xorl %ecx, %ecx
-    callxt glShaderSource
+    movl $1, %edi
+    leaq 28(%rsp), %rsi
+    movl $0x9551, %edx # GL_SHADER_BINARY_FORMAT_SPIR_V
+    movl 16(%rsp), %ecx
+    movl 12(%rsp), %r8d
+    callxt glShaderBinary
 
-    movl 20(%rsp), %edi
-    callxt glCompileShader
+    movl 28(%rsp), %edi
+    leaq ENTRY_POINT(%rip), %rsi
+    xorl %edx, %edx
+    xorq %rcx, %rcx
+    xorq %r8, %r8
+    callxt glSpecializeShader
 
-    movl 20(%rsp), %edi
+    movl 28(%rsp), %edi
     movl $0x8b81, %esi # GL_COMPILE_STATUS
-    leaq 28(%rsp), %rdx
+    leaq 36(%rsp), %rdx
     callxt glGetShaderiv
-    movl 28(%rsp), %eax
+    movl 36(%rsp), %eax
     call assert
 
     //
 
     callxt glCreateProgram
     call assert
-    movl %eax, 24(%rsp)
+    movl %eax, 32(%rsp)
 
-    movl 24(%rsp), %edi
-    movl 16(%rsp), %esi
+    movl 32(%rsp), %edi
+    movl 24(%rsp), %esi
     callxt glAttachShader
 
-    movl 24(%rsp), %edi
-    movl 20(%rsp), %esi
+    movl 32(%rsp), %edi
+    movl 28(%rsp), %esi
     callxt glAttachShader
 
-    movl 24(%rsp), %edi
+    movl 32(%rsp), %edi
     callxt glLinkProgram
 
-    //
-
-    movl 24(%rsp), %edi
-    callxt glValidateProgram
-
-    movl 24(%rsp), %edi
+    movl 32(%rsp), %edi
     movl $0x8b82, %esi # GL_LINK_STATUS
-    leaq 28(%rsp), %rdx
+    leaq 36(%rsp), %rdx
     callxt glGetProgramiv
-    movl 28(%rsp), %eax
+    movl 36(%rsp), %eax
     call assert
 
     //
 
-    movl 20(%rsp), %edi
+    movl 32(%rsp), %edi
+    callxt glValidateProgram
+
+    movl 32(%rsp), %edi
+    movl $0x8b83, %esi # GL_VALIDATE_STATUS
+    leaq 36(%rsp), %rdx
+    callxt glGetProgramiv
+    movl 36(%rsp), %eax
+    call assert
+
+    //
+
+    movl 32(%rsp), %edi
+    movl 28(%rsp), %esi
+    callxt glDetachShader
+    movl 28(%rsp), %edi
     callxt glDeleteShader
-    movl 16(%rsp), %edi
+
+    movl 32(%rsp), %edi
+    movl 24(%rsp), %esi
+    callxt glDetachShader
+    movl 24(%rsp), %edi
     callxt glDeleteShader
 
     //
 
-    movl 24(%rsp), %eax # return program
+    movl 32(%rsp), %eax # return program
     addq $MAKE_SHADERS_STACK, %rsp
     ret
 
