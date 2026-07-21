@@ -739,7 +739,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
 .align 16
 .type renderTexquad, @function
 renderTexquad: # receives Texquad*
-    endbr64
+    endbr64 # // ---> TODO: STACK ALIGNMENT <---
     movq %rdi, %rbp # Texquad*
 
     //
@@ -775,10 +775,39 @@ renderTexquad: # receives Texquad*
     xorl %edi, %edi
     callxt glUseProgram
 
-    //
-
     ret
-    
+
+.align 16
+.type removeTexquad, @function
+removeTexquad: # receives Texquad*
+    endbr64
+    subq $8, %rsp # stack alignment (8 + any call = 16) and temp buffer for ebo and vao
+
+    movq %rdi, %rbp
+
+    movl $1, %edi
+    leaq 33(%rdi), %rsi # &texquad->texture // ---> TODO: make accessing structures' fields like in this function (*) <---
+    callxt glDeleteTextures
+
+    movl 5(%rbp), %edi # texquad->program (*)
+    callxt glDeleteProgram
+
+    movl $2, %edi
+    movq $0, (%rsp)
+    movl 29(%rbp), %eax # texquad->ebo (*)
+    movl %eax, (%rsp)
+    movl 25(%rbp), %eax # texquad->vbo (*)
+    movl %eax, 4(%rsp)
+    leaq (%rsp), %rsi # (uint[2]) {texquad->ebo, texquad->vbo}
+    callxt glDeleteBuffers
+
+    movl $1, %edi
+    leaq 1(%rbp), %rsi # &texquad->vao (*)
+    callxt glDeleteVertexArrays
+
+    addq $8, %rsp
+    ret
+
 .align 16
 .type render, @function
 render:
