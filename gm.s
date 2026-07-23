@@ -26,6 +26,11 @@ HEIGHT = 640
 UPDATE_PERIOD = 16
 OBJECTS = 3
 
+DEBUG_S = 0x0a7325 # // %s\n
+DEBUG_P = 0x0a7025 # // %p\n
+DEBUG_D = 0x0a6425 # // %p\n
+DEBUG_F = 0x0a6625 # // %f\n
+
 .align 16
 .local SDL_HINT_VIDEO_DRIVER
 .type SDL_HINT_VIDEO_DRIVER, @object
@@ -54,13 +59,7 @@ OUTPUT_IMAGE: .asciz "gmout2.png"
 .align 16
 .local BOOTSTRAP_QUAD_INDICES
 .type BOOTSTRAP_QUAD_INDICES, @object
-BOOTSTRAP_QUAD_INDICES:
-    .float 0.0
-    .float 1.0
-    .float 3.0
-    .float 1.0
-    .float 2.0
-    .float 3.0
+BOOTSTRAP_QUAD_INDICES: .float 0.0, 1.0, 3.0, 1.0, 2.0, 3.0
 BOOTSTRAP_QUAD_INDICES_SIZE = (. - BOOTSTRAP_QUAD_INDICES)
 
 .align 16
@@ -103,32 +102,6 @@ TEST_FRAGMENT:
     .zero 1
 TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 
-.align 16
-.local DEBUG_LU
-.type DEBUG_LU, @object
-DEBUG_LU:
-    .asciz "%lu\n"
-.align 16
-.local DEBUG_S
-.type DEBUG_S, @object
-DEBUG_S:
-    .asciz "%s\n"
-.align 16
-.local DEBUG_F
-.type DEBUG_F, @object
-DEBUG_F:
-    .asciz "%f\n"
-.align 16
-.local DEBUG_X
-.type DEBUG_X, @object
-DEBUG_X:
-    .asciz "%x\n"
-.align 16
-.local DEBUG_P
-.type DEBUG_p, @object
-DEBUG_P:
-    .asciz "%p\n"
-
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
 
@@ -166,6 +139,15 @@ DEBUG_P:
     call *\n@gotpcrel(%rip)
 .endm
 
+.macro xprint f, r, x # // formatString registerInWhichTheValueIs(8 bytes) xmmRegistersUsedCount; pushes/pops 8 bytes
+    pushq $\f
+    movq %rsp, %rdi
+    movq %\r, %rsi
+    movb $\x, %al
+    callxt printf
+    popq %rax
+.endm
+
 .align 16
 .type assert, @function
 assert: # first parameter int is in the eax for optimization's sake
@@ -181,11 +163,8 @@ assert: # first parameter int is in the eax for optimization's sake
 captureCanvas:
     endbr64
 
-    movl $WIDTH, %ebp
-    imull $HEIGHT, %ebp # TODO: calculate inside lea instruction directly
-    imull $4, %ebp # stack displacement, the result is divisible by 16 already but as we will call smth we need to take additional 8 from any call so for the stack pointer to be 16-aligned we need to add 8
-    addl $8, %ebp # also this is an argument for 7th argument, starts at 0(%rsp)
-    subq %rbp, %rsp # buffer for pixels, starts at 8(%rsp)
+    CAPTURE_CANVAS_STACK = WIDTH * HEIGHT * 4 + 8 # // stack alignment and also this is a space for the 7th argument, starts at 0(%rsp)
+    subq $CAPTURE_CANVAS_STACK, %rsp # buffer for pixels, starts at 8(%rsp)
 
     //
     
@@ -225,8 +204,8 @@ captureCanvas:
 
     movq %rbx, %rdi
     callxt SDL_DestroySurface
-    
-    addq %rbp, %rsp
+
+    addq $CAPTURE_CANVAS_STACK, %rsp
     ret
 
 .align 16
@@ -235,7 +214,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     endbr64
 
     BOOTSTRAP_QUAD_STACK = 40
-    subq $BOOTSTRAP_QUAD_STACK, %rsp # 3 * 8 int* + 4 int + 8 float* + 4 padding
+    subq $BOOTSTRAP_QUAD_STACK, %rsp # 3 * 8 int* + 4 int + 8 float* + 4 padding for stack alignment
 
     movq %rdi, (%rsp)
     movq %rsi, 8(%rsp)
@@ -300,7 +279,7 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     endbr64
 
     MAKE_SHADERS_STACK = 40
-    subq $MAKE_SHADERS_STACK, %rsp # 2 * 4 int + 2 * 8 char* + 4 * 4 int + another 8 from any call would make rsp be 16-aligned
+    subq $MAKE_SHADERS_STACK, %rsp # 2 * 4 int + 2 * 8 char* + 4 * 4 int + zero padding for stack alignment
     # 0() vertexSize, 4() vertex, 12() fragmentSize, 16() fragment, 24() vertexShader, 28() fragmentShader, 32() program, 36() success
 
     movl %edi, (%rsp)
@@ -429,18 +408,18 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
 createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being destroyed here, const float* model
     endbr64
 
-    # 8 texquad + 8 surface + 8 model + 8 any call = 16 aligned
+    # 8 texquad + 8 surface + 8 model + zero padding for stack alignment
     CREATE_TEXQUAD_STACK = 24
     subq CREATE_TEXQUAD_STACK, %rsp
 
     movq %rdi, (%rsp)
     movq %rsi, 8(%rsp)
     movq %rdx, 16(%rsp)
-    
+
     //
     
     testq %rsi, %rsi
-    jz .LcreateTexquad.bootstrap # surface == null 
+    jz .LcreateTexquad.bootstrap # // surface == null 
 
     //
 
@@ -494,10 +473,10 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     xorl %esi, %ecx
     movl 8+8(%rsp), %r8d # surface->w
     movl 8+12(%rsp), %r9d # surface->h
-    pushq $24 # surface->pixels # 9th
+    pushq $24 # surface->pixels # // 9th
     pushq $0x1401 # GL_UNSIGNED_BYTE # 8th
     pushq $0x1908 # GL_RGBA # 7th
-    callxt glTextureSubImage2D # arguments go on stack in reverse order
+    callxt glTextureSubImage2D # // arguments go on stack in reverse order
 
     movl %ebp, %edi
     callxt glGenerateTextureMipmap
@@ -531,8 +510,8 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
 
     # TODO: replace movd with vmovsd
 
-    CREATE_TEXQUAD_STACK2 = 80 # also add CREATE_TEXQUAD_STACK from previous allocation
-    subq $CREATE_TEXQUAD_STACK2, %rsp # 8 bytes padding to align the vertices themselves + 64 bytes for actual vertices + 8 bytes padding so that a call would add another 8 to complete 16-alignment
+    CREATE_TEXQUAD_STACK2 = 64 # // also add CREATE_TEXQUAD_STACK from previous allocation
+    subq $CREATE_TEXQUAD_STACK2, %rsp # 64 bytes for actual vertices + zero bytes padding for stack alignment
 
     pextrd $0, %xmm1, CREATE_TEXQUAD_STACK+0(%rsp) # x + w
     pextrd $1, %xmm1, CREATE_TEXQUAD_STACK+4(%rsp) # y + h
@@ -641,7 +620,7 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     
     movb 37(%rsp), %al # texquad->clip
     testb %al, %al
-    jnz .LcreateTexquad.useClip # if texquad->clip = true
+    jnz .LcreateTexquad.useClip # // if texquad->clip = true
     pxor %xmm1, %xmm1 # vec4(0.f) in xmm1
     jmp .LcreateTexquad.endClip
 .LcreateTexquad.useClip: # TODO: optimize
@@ -653,14 +632,14 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     leaq UNIFORM_CLIP(%rip), %rsi
     callxt glGetUniformLocation
 
-    CREATE_TEXQUAD_STACK3 = 56 # also add CREATE_TEXQUAD_STACK from previous allocation
-    subq $CREATE_TEXQUAD_STACK3, %rsp # 24 from previous allocation + 8 alignment + 4 floats + 8 padding + any call = 16-aligned
-    movaps %xmm0, CREATE_TEXQUAD_STACK+8(%rsp)
+    CREATE_TEXQUAD_STACK3 = 16 # // also add CREATE_TEXQUAD_STACK from previous allocation
+    subq $CREATE_TEXQUAD_STACK3, %rsp # 4 floats + zero padding
+    movaps %xmm0, CREATE_TEXQUAD_STACK(%rsp)
 
     movl %ebp, %edi # texquad->program
     movl %eax, %esi # clip uniform location
     movl $1, %edx
-    leaq CREATE_TEXQUAD_STACK+8(%rsp), %rcx
+    leaq CREATE_TEXQUAD_STACK(%rsp), %rcx
     callxt glProgramUniform4fv
 
     addq $CREATE_TEXQUAD_STACK3, %rsp
@@ -687,7 +666,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     endbr64
 
     CREATE_TEXTURE_STACK = 40
-    subq $CREATE_TEXTURE_STACK, %rsp # 3 * 8 void* + 4 int + 12 padding + 8 any call = 16-aligned
+    subq $CREATE_TEXTURE_STACK, %rsp # 3 * 8 void* + 4 int + 12 padding for stack alignment
     # 0() imgPathOrText, 8() imageOrText, 12() SDL_Surface* temp, 20() SDL_Surface* converted
 
     movq %rdi, (%rsp)
@@ -696,7 +675,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movq $0, 20(%rsp)
 
     //
-    
+
     testl %esi, %esi # if imgOrText
     jz .LcreateTexture.text
     #movq %rdi, %rdi
@@ -706,7 +685,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movq gFont(%rip), %rdi
     movq (%rsp), %rsi
     xorq %rdx, %rdx
-    movl $0xff7f7f7f, %ecx # (SDL_Color) {127, 127, 127, 255}
+    movl $0x7f7f7fff, %ecx # (SDL_Color) {127, 127, 127, 255}
     callxt TTF_RenderText_Blended
 .LcreateTexture.endCondition:
     call assert
@@ -740,7 +719,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
 .type renderTexquad, @function
 renderTexquad: # receives Texquad*
     endbr64
-    subq $8, %rsp # stack alignment (8 + any call = 16)
+    subq $8, %rsp # stack alignment (cuz inside a caller it's aligned until the call instruction which substructs 8, making the stack misaligned, so we need to substract 8 more bytes to align the stack)
     movq %rdi, %rbp # Texquad*
 
     //
@@ -754,8 +733,9 @@ renderTexquad: # receives Texquad*
     addq $33, %rsi # &texquad->texture
     callxt glBindTexture
 
-    movq %rbp, %rdi # ---> TODO: replace all of these with leaq inline calculations <---
-    addq $1, %rdi # &texquad->vao
+    leaq (%rbp, 1), %rdi # TODO: test
+    # movq %rbp, %rdi # ---> TODO: replace all of these with leaq inline calculations <---
+    # addq $1, %rdi # &texquad->vao
     callxt glBindVertexArray
 
     //
@@ -783,7 +763,7 @@ renderTexquad: # receives Texquad*
 .type removeTexquad, @function
 removeTexquad: # receives Texquad*
     endbr64
-    subq $8, %rsp # stack alignment (8 + any call = 16) and temp buffer for ebo and vao
+    subq $8, %rsp # stack alignment (aligned -> call -> misaligned -> *align* -> free -> return) and a space for temp array of buffer ids
     movq %rdi, %rbp # Texquad*
 
     movl $1, %edi
@@ -794,7 +774,6 @@ removeTexquad: # receives Texquad*
     callxt glDeleteProgram
 
     movl $2, %edi
-    movq $0, (%rsp)
     movl 29(%rbp), %eax # texquad->ebo (*)
     movl %eax, (%rsp)
     movl 25(%rbp), %eax # texquad->vbo (*)
@@ -810,6 +789,13 @@ removeTexquad: # receives Texquad*
     ret
 
 .align 16
+.type createLine, @object
+createLine:
+    endbr64
+
+    ret
+    
+.align 16
 .type render, @function
 render:
     endbr64
@@ -821,7 +807,7 @@ render:
 loop:
     endbr64
 
-    # 8 - window, 128 - event, 8 - ticks, 8 from each call - so additional 8 for 16-alignment
+    # 8 - window, 128 - event, 8 - ticks, 8 padding for stack alignment
     LOOP_STACK = 152
     subq $LOOP_STACK, %rsp
     # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event
@@ -882,13 +868,8 @@ loop:
 .type debugCallback, @function
 debugCallback:
     endbr64
-    # popq %rax # unused 7th argument and to substract 8 from rsp so when the call to printf substract 8 more bytes it will be 16-aligned
-
-    leaq DEBUG_S(%rip), %rdi
-    movq %r9, %rsi
-    movb $0, %al # zero xmm* registers used
-    callxt printf
-
+    # ignore misalignment
+    xprint DEBUG_S r9 0 # // push/pop stack - makes it temporary aligned so we don't have to do it here
     ret
 
 .align 16
@@ -896,7 +877,8 @@ debugCallback:
 .global main
 main:
     endbr64
-    subq $24, %rsp # 0() window, 8() glContext, 16() padding; 16 + 8 + call = 16-aligned
+    MAIN_STACK = 24
+    subq $MAIN_STACK, %rsp # 0() window, 8() glContext, 16() padding; rsp initially is not 16-aligned so we need to add extra 8 -> 16 + 8 = 24
 
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
     leaq VIDEO_DRIVERS(%rip), %rsi
@@ -1044,8 +1026,8 @@ main:
 
     callxt SDL_Quit
 
-    //
+    // 
 
     xorl %eax, %eax # return 0
-    addq $24, %rsp
+    addq $MAIN_STACK, %rsp
     ret
