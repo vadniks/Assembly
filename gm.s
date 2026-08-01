@@ -787,7 +787,7 @@ removeTexquad: # receives Texquad*
 
 .align 16
 .type createLine, @object
-createLine:
+createLine: # receives Line*
     endbr64
     subq $8, %rsp # stack alignment
     movq %rdi, %rbp # Line*
@@ -834,6 +834,50 @@ createLine:
     addq $16, %rsp # free the vector
 
     //
+
+    addq $8, %rsp
+    ret
+
+.align 16
+.type renderLine, @function
+renderLine: # receives const Line*
+    endbr64 # // -------------------> TODO: save rbp on stack in each function's start (end restore in the end) where non-volatile registers are used so not to mess up things for callers <-----------------------
+    subq $8, %rsp # stack alignment
+    movq %rdi, %rbp # Line* line
+
+    movl 5(%rbp), %edi # line->program
+    callxt glUseProgram
+
+    movl 1(%rbp), %edi # line->vao
+    callxt glBindVertexArray
+
+    movl $4, %edi # GL_TRIANGLES
+    xorl %esi, %esi
+    movl $6, %edx
+    callxt glDrawArrays
+
+    xorl %edi, %edi
+    callxt glBindVertexArray
+
+    xorl %edi, %edi
+    callxt glUseProgram
+
+    addq $8, %rsp
+    ret
+
+.align 16
+.type removeLine, @function
+removeLine: # receives Line* line
+    endbr64
+    subq $8, %rsp # stack alignment
+    movq %rdi, %rbp # Line*
+
+    movl $1, %edi
+    leaq 1(%rbp), %rsi # &line->vao
+    callxt glDeleteVertexArrays
+
+    movl 5(%rbp), %edi # line->program
+    callxt glDeleteProgram
 
     addq $8, %rsp
     ret
