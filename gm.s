@@ -82,7 +82,7 @@ ENTRY_POINT: .asciz "main"
 .align 16
 .local TEST_VERTEX
 .type TEST_VERTEX, @object
-TEST_VERTEX:
+TEST_VERTEX: # TODO: replace with spirv bytecode
     .ascii "#version 460 core\n"
     .ascii "void main() {\n"
     .ascii "gl_Position = vec4(0);\n"
@@ -184,8 +184,7 @@ captureCanvas:
     movl $HEIGHT, %esi
     movl $0x16762004, %edx # SDL_PIXELFORMAT_RGBA32
     leaq 8(%rsp), %rcx # &buffer{}
-    movl $WIDTH, %r8d
-    imull $4, %r8d
+    leal WIDTH(%edi, %edi, 2), %r8d # // WIDTH + (WIDTH + WIDTH * 2) = WIDTH=edi * 4
     callxt SDL_CreateSurfaceFrom
     call assert
     movq %rax, %rbx # SDL_Surface* surface
@@ -232,7 +231,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     call assert
 
     //
-    
+
     movl $1, %edi
     movq 8(%rsp), %rsi
     callxt glCreateBuffers
@@ -419,12 +418,11 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     //
     
     testq %rsi, %rsi
-    jz .LcreateTexquad.bootstrap # // surface == null 
+    jz .LcreateTexquad.bootstrap # // surface == null
 
     //
 
-    movq (%rsp), %rbp
-    addq $33, %rbp # &texquad->texture
+    leaq 33(%rsp), %rbp # &texquad->texture
 
     movl $0xde1, %edi # GL_TEXTURE_2D
     movl $1, %esi
@@ -463,20 +461,26 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     movl %ebp, %edi
     movl $1, %esi
     movl $0x8058, %edx # GL_RGBA8
-    movl 8+8(%rsp), %ecx # surface->w
-    movl 8+12(%rsp), %r8d # surface->h
+    movq 8(%rsp), %rcx
+    movl 8(%rcx), %ecx # surface->w
+    movq 8(%rsp), %r8
+    movl 12(%r8), %r8d  # surface->h
     callxt glTextureStorage2D
 
     movl %ebp, %edi
     xorl %esi, %esi
     xorl %esi, %edx
     xorl %esi, %ecx
-    movl 8+8(%rsp), %r8d # surface->w
-    movl 8+12(%rsp), %r9d # surface->h
-    pushq $24 # surface->pixels # // 9th
-    pushq $0x1401 # GL_UNSIGNED_BYTE # 8th
-    pushq $0x1908 # GL_RGBA # 7th
+    movq 8(%rsp), %r8
+    movl 8(%r8), %r8d # surface->w
+    movq 8(%rsp), %r9
+    movl 12(%r9), %r9d # surface->h
+    subq $8, %rsp # stack alignment // TODO: align the stack everywhere there's any push and more than 6 arguments for a function <--------------------------------------------------------------------
+    pushq $24 # // surface->pixels # // 9th
+    pushq $0x1401 # // GL_UNSIGNED_BYTE # 8th
+    pushq $0x1908 # // GL_RGBA # 7th
     callxt glTextureSubImage2D # // arguments go on stack in reverse order
+    addq $32, %rsp # free arguments
 
     movl %ebp, %edi
     callxt glGenerateTextureMipmap
@@ -490,21 +494,17 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     pxor %xmm1, %xmm1
 
     movq (%rsp), %rdi
-    addq $9, %rdi
-    pinsrd $0, (%rdi), %xmm0 # texquad->x float
+    pinsrd $0, 9(%rdi), %xmm0 # texquad->x float
     #
     movq (%rsp), %rsi
-    addq $13, %rsi
-    pinsrd $1, (%rsi), %xmm0 # texquad->y float
+    pinsrd $1, 13(%rsi), %xmm0 # texquad->y float
     #
     movq (%rsp), %rdx
-    addq $17, %rdx
-    pinsrd $0, (%rdx), %xmm1 # texquad->w long starting at the lower 4 bytes of the lower 8 bytes
+    pinsrd $0, 17(%rdx), %xmm1 # texquad->w long starting at the lower 4 bytes of the lower 8 bytes
     #
     movq (%rsp), %rcx
-    addq $21, %rcx
-    pinsrd $1, (%rcx), %xmm1 # texquad->h long starting at the upper 4 bytes of the lower 8 bytes
-    
+    pinsrd $1, 21(%rcx), %xmm1 # texquad->h long starting at the upper 4 bytes of the lower 8 bytes
+
     cvtdq2ps %xmm1, %xmm1 # convert longwords in xmm1 to single precision floats and store them in xmm1
     addps %xmm0, %xmm1 # sum all floats at once, store them in xmm1
 
@@ -533,12 +533,11 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     movl $0, CREATE_TEXQUAD_STACK+56(%rsp) # 0.f
     movl $0x3f800000, CREATE_TEXQUAD_STACK+60(%rsp) # 1.f
 
-    movq (%rsp), %rax
-    movq %rax, %rdi
+    movq (%rsp), %rdi
     addq $1, %rdi # &texquad->vao
-    movq %rax, %rsi
+    movq (%rsp), %rsi
     addq $25, %rsi # &texquad->vbo
-    movq %rax, %rdx
+    movq (%rsp), %rdx
     addq $29, %rdx # &texquad->ebo
     movl $64, %ecx # sizeof(vertices)
     leaq CREATE_TEXQUAD_STACK(%rsp), %r8 # &vertices
@@ -546,19 +545,16 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
 
     addq $CREATE_TEXQUAD_STACK2, %rsp # drop vertices
 
-    movq (%rsp), %rax
-    movq %rax, %rdi
-    addq $1, %rdi
-    movl (%rdi), %edi # texquad->vao
-    movl %edx, %ebp
+    movq (%rsp), %rdi
+    movl 1(%rdi), %edi # texquad->vao
+    movl %edi, %ebp # texquad->vao
     xorl %esi, %esi
-    movq %rax, %rdx
-    addq $25, %rdx
-    movl (%rdx), %edx # texquad->vbo
+    movq (%rsp), %rdx
+    movl 25(%rdx), %edx # texquad->vbo
     xorl %ecx, %ecx
     movl $16, %r8d
     callxt glVertexArrayVertexBuffer
-    
+
     //
 
     movl %ebp, %edi # texquad->vao
@@ -590,8 +586,7 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     leaq TEST_FRAGMENT(%rip), %rcx
     call makeShaders
     movq (%rsp), %rdi
-    addq $5, %rdi # &texquad->program
-    movl %eax, (%rdi)
+    movl %eax, 5(%rdi) # &texquad->program
     movl %eax, %ebp # texquad->program
 
     //
@@ -599,11 +594,9 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     pxor %xmm0, %xmm0
 
     movq (%rsp), %rax
-    addq $17, %rax
-    pinsrd $0, (%rax), %xmm0 # texquad->w
+    pinsrd $0, 17(%rax), %xmm0 # texquad->w
     movq (%rsp), %rax
-    addq $21, %rax
-    pinsrd $1, (%rax), %xmm0 # texquad->h
+    pinsrd $1, 21(%rax), %xmm0 # texquad->h
 
     movabs $0x4000000040000000, %rax # two 2.f floats in hex (little endian)
     movq %rax, %xmm1
@@ -612,13 +605,12 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     divps %xmm1, %xmm0 # wHalf and hHalf are in the 0-64 bits of xmm0
 
     movq (%rsp), %rax
-    addq $9, %rax
-    pinsrd $0, (%rax), %xmm1 # texquad->x
+    pinsrd $0, 9(%rax), %xmm1 # texquad->x
     movq (%rsp), %rax
-    addq $13, %rax
-    pinsrd $1, (%rax), %xmm1 # texquad->y
-    
-    movb 37(%rsp), %al # texquad->clip
+    pinsrd $1, 13(%rax), %xmm1 # texquad->y
+
+    movq (%rsp), %rax
+    movb 37(%rax), %al # texquad->clip
     testb %al, %al
     jnz .LcreateTexquad.useClip # // if texquad->clip = true
     pxor %xmm1, %xmm1 # vec4(0.f) in xmm1
@@ -627,7 +619,7 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     addps %xmm0, %xmm1 # texquad->x + wHalf, texquad->y + hHalf in xmm1
     movlhps %xmm0, %xmm1
 .LcreateTexquad.endClip:
-    
+
     movl %ebp, %edi # texquad->program
     leaq UNIFORM_CLIP(%rip), %rsi
     callxt glGetUniformLocation
@@ -649,15 +641,17 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
     movl %ebp, %edi # texquad->program
     leaq UNIFORM_MODEL(%rip), %rsi
     callxt glGetUniformLocation
-    
+
     movl %ebp, %edi # texquad->program
     movl %eax, %esi # model uniform location
     movl $1, %edx
     xorl %ecx, %ecx
     movq 16(%rsp), %r8 # float* model
     callxt glProgramUniformMatrix4fv
-    
-    addq CREATE_TEXQUAD_STACK, %rsp    
+
+    //
+
+    addq CREATE_TEXQUAD_STACK, %rsp
     ret
 
 .align 16
@@ -733,9 +727,7 @@ renderTexquad: # receives Texquad*
     addq $33, %rsi # &texquad->texture
     callxt glBindTexture
 
-    leaq (%rbp, 1), %rdi # TODO: test
-    # movq %rbp, %rdi # ---> TODO: replace all of these with leaq inline calculations <---
-    # addq $1, %rdi # &texquad->vao
+    leaq 1(%rbp), %rdi # &texquad->vao
     callxt glBindVertexArray
 
     //
@@ -767,22 +759,22 @@ removeTexquad: # receives Texquad*
     movq %rdi, %rbp # Texquad*
 
     movl $1, %edi
-    leaq 33(%rdi), %rsi # &texquad->texture // ---> TODO: make accessing structures' fields like in this function (*) <---
+    leaq 33(%rbp), %rsi # &texquad->texture
     callxt glDeleteTextures
 
-    movl 5(%rbp), %edi # texquad->program (*)
+    movl 5(%rbp), %edi # texquad->program
     callxt glDeleteProgram
 
     movl $2, %edi
-    movl 29(%rbp), %eax # texquad->ebo (*)
+    movl 29(%rbp), %eax # texquad->ebo
     movl %eax, (%rsp)
-    movl 25(%rbp), %eax # texquad->vbo (*)
+    movl 25(%rbp), %eax # texquad->vbo
     movl %eax, 4(%rsp)
     leaq (%rsp), %rsi # (uint[2]) {texquad->ebo, texquad->vbo}
     callxt glDeleteBuffers
 
     movl $1, %edi
-    leaq 1(%rbp), %rsi # &texquad->vao (*)
+    leaq 1(%rbp), %rsi # &texquad->vao
     callxt glDeleteVertexArrays
 
     addq $8, %rsp
@@ -817,14 +809,14 @@ loop:
     callxt SDL_GetTicks
     movq %rax, 8(%rsp)
 
-    movl $0x3f800000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
+    movl $0x3f80000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
     movd %eax, %xmm0
     movd %eax, %xmm1
     movd %eax, %xmm2
     movd %eax, %xmm3
     callxt glClearColor
 
-    movl $0x4000, %edi
+    movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
     callxt glClear
 
     call render
@@ -850,7 +842,7 @@ loop:
     jmp .Lloop.eventsLoop
 
 .Lloop.eventsLoopEnd:
-    callxt SDL_GetTicks # rax = elapsed
+    callxt SDL_GetTicks # // rax = elapsed
     subq 8(%rsp), %rax
     cmpq $UPDATE_PERIOD, %rax
     ja .Lloop.infiniteLoop
@@ -911,7 +903,7 @@ main:
     call assert
 
     //
-    
+
     movl $17, %edi # SDL_GL_CONTEXT_MAJOR_VERSION
     movl $4, %esi
     callxt SDL_GL_SetAttribute
@@ -942,7 +934,7 @@ main:
     call assert
 
     //
-    
+
     leaq EMPTY_STR(%rip), %rdi
     movl $WIDTH, %esi
     movl $HEIGHT, %edx
@@ -976,14 +968,14 @@ main:
     callxt glDebugMessageCallback
 
     //
-    
+
     movl $0x809d, %edi # GL_MULTISAMPLE
     callxt glEnable
     movl $0x809e, %edi # GL_SAMPLE_ALPHA_TO_COVERAGE
     callxt glEnable
 
     //
-    
+
     movl $0xbe2, %edi # GL_BLEND
     callxt glEnable
     movl $0x302, %edi # GL_SRC_ALPHA
@@ -991,19 +983,19 @@ main:
     callxt glBlendFunc
 
     //
-    
+
     movl $1, %edi
     callxt SDL_GL_SetSwapInterval
     call assert
 
     //
-    
+
     movl $0x84ff, %edi # GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
     leaq gMaxAnisotropy(%rip), %rsi
     callxt glGetFloatv
 
     //
-    
+
     movq (%rsp), %rdi
     call loop
 
@@ -1026,7 +1018,7 @@ main:
 
     callxt SDL_Quit
 
-    // 
+    //
 
     xorl %eax, %eax # return 0
     addq $MAIN_STACK, %rsp
