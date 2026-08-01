@@ -132,6 +132,11 @@ TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 #     bool clip;
 # } Texquad; // size = 9 + 2 * 4 + 5 * 4 + 1 = 38
 
+# typedef struct {
+#     Object; // ms-anon-structure-tag = copies the whole structure
+#     GLfloat x0, y0, x1, y1, width;
+# } Line; // size = 9 + 5 * 4 = 29
+
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
 
@@ -784,9 +789,55 @@ removeTexquad: # receives Texquad*
 .type createLine, @object
 createLine:
     endbr64
+    subq $8, %rsp # stack alignment
+    movq %rdi, %rbp # Line*
 
+    movl $1, %edi
+    leal 1(%rbp), %esi # &line->vao
+    callxt glGenVertexArrays
+    movl 1(%rbp), %eax # line->vao
+    call assert
+
+    //
+
+    // TODO: replace with the real ones
+    movl $TEST_VERTEX_SIZE, %edi
+    leaq TEST_VERTEX(%rip), %rsi
+    movl $TEST_FRAGMENT_SIZE, %edx
+    leaq TEST_FRAGMENT(%rip), %rcx
+    call makeShaders
+    movl %eax, 5(%rbp) # line->program
+
+    //
+
+    movl 5(%rbp), %edi # line->program
+    xorl %esi, %esi
+    movl $1, %edx
+    leaq 9(%rbp), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1)
+    callxt glProgramUniform4fv
+
+    movl 5(%rbp), %edi # line->program
+    movl $1, %esi
+    movss 25(%rbp), %xmm0 # line->width
+    callxt glProgramUniform1f
+
+    subq $16, %rsp # space for the vector(4 * floats), no alignment needed
+    movl 5(%rbp), %edi # line->program
+    movl $2, %esi
+    movl $1, %edx
+    movl $0, 8+0(%rsp)
+    movl $0x3f800000, 8+4(%rsp) # 1.f
+    movl $0, 8+8(%rsp)
+    movl $0x3f800000, 8+12(%rsp) # 1.f
+    leaq 8(%rsp), %rcx # &vector[0]
+    callxt glProgramUniform4fv
+    addq $16, %rsp # free the vector
+
+    //
+
+    addq $8, %rsp
     ret
-    
+
 .align 16
 .type render, @function
 render:
