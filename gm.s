@@ -16,7 +16,7 @@
 // Version: dated July 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL gm.s -o gm
+// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
@@ -111,7 +111,7 @@ TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 
 .local gMaxAnisotropy
 .type gMaxAnisotropy, @object
-.comm gMaxAnisotropy, 4, 16
+.comm gMaxAnisotropy, 4, 16 # uint
 
 # pragma pack for structs = no paddings
 
@@ -136,6 +136,10 @@ TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 #     Object; // ms-anon-structure-tag = copies the whole structure
 #     GLfloat x0, y0, x1, y1, width;
 # } Line; // size = 9 + 5 * 4 = 29
+
+.local gUbo
+.type gUbo, @object
+.comm gUbo, 4, 16 # uint
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -883,10 +887,130 @@ removeLine: # receives Line* line
     ret
 
 .align 16
+.type processObject, @function
+processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, esi)
+    endbr64
+    subq $8, %rsp # stack alignment and bool
+    movl %esi, (%rsp) # renderOrDelete?
+    movq %rdi, %rbp # * object
+
+    //
+
+    movb 0(%rdi), %al # object->type
+
+    cmpb $0, %al # TYPE_TEXQUAD
+    je .LprocessObject.texquad
+    cmpb $1, %al # TYPE_LINE
+    je .LprocessObject.line
+
+    xorl %eax, %eax
+    call assert
+
+    //
+
+.LprocessObject.texquad:
+    testl %esi, %esi
+    jz .LprocessObject.texquad.delete
+
+    # movq %rdi, %rdi # * object
+    call renderTexquad
+    jmp .LprocessObject.end
+.LprocessObject.texquad.delete:
+    # movq %rdi, %rdi # * object
+    call removeTexquad
+    jmp .LprocessObject.end
+
+    //
+
+.LprocessObject.line:
+    testl %esi, %esi
+    jz .LprocessObject.line.delete
+
+    # movq %rdi, %rdi # * object
+    call renderLine
+    jmp .LprocessObject.end
+.LprocessObject.line.delete:
+    # movq %rdi, %rdi # * object
+    call removeLine
+    jmp .LprocessObject.end
+
+    //
+
+.LprocessObject.end:
+    movl (%rsp), %eax # renderOrDelete?
+    testl %eax, %eax
+    jnz .LprocessObject.end.noFree
+    movq %rbp, %rdi # * object
+    callxt free
+.LprocessObject.end.noFree:
+
+    //
+
+    addq $8, %rsp # stack alignment
+    ret
+
+.align 16
 .type render, @function
 render:
     endbr64
     nop
+    ret
+
+.align 16
+.type createUbo, @function
+createUbo:
+    endbr64
+    CREATE_UBO_STACK = 72 # // 8 alignment + projection matrix of 4 vectors of 4 floats each 8(rsp)
+    subq $CREATE_UBO_STACK, %rsp
+
+    //
+
+    pxor %xmm0, %xmm0 # 0.f
+    movl $WIDTH, %eax
+    cvtsi2ss %eax, %xmm1 # (float) WIDTH
+    movl $HEIGHT, %eax
+    cvtsi2ss %eax, %xmm2 # (float) HEIGHT
+    pxor %xmm3, %xmm3 # 0.f
+    movl $0x3f80000, %eax
+    movd %eax, %xmm4  # 1.f
+    leaq 8(%rsp), %rdi # &projection
+    callxt glmc_ortho
+
+    //
+
+    movl $1, %edi
+    leaq gUbo(%rip), %rsi
+    callxt glCreateBuffers
+    movl gUbo(%rip), %eax
+    call assert
+
+    movl gUbo(%rip), %edi
+    movl $64, %esi # sizeof(mat4)
+    leaq 8(%rsp), %rdx # &projection
+    xorl %ecx, %ecx
+    callxt glNamedBufferStorage
+
+    movl $0x8a11, %edi # GL_UNIFORM_BUFFER
+    xorl %esi, %esi
+    movl gUbo(%rip), %edx
+    callxt glBindBufferBase
+
+    //
+
+    addq $CREATE_UBO_STACK, %rsp
+    ret
+
+.align 16
+.type removeUbo, @function
+removeUbo:
+    endbr64
+    subq $8, %rsp # stack alignment
+
+    movl $1, %edi
+    leaq gUbo(%rip), %rsi
+    callxt glDeleteBuffers
+
+    addq $8, %rsp # stack alignment
     ret
 
 .align 16
@@ -904,11 +1028,12 @@ loop:
     callxt SDL_GetTicks
     movq %rax, 8(%rsp)
 
-    movl $0x3f80000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
-    movd %eax, %xmm0
-    movd %eax, %xmm1
-    movd %eax, %xmm2
-    movd %eax, %xmm3
+    # movl $0x3f80000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
+    movl $1, %eax
+    cvtsi2ss %eax, %xmm0 # convert to float
+    movss %xmm0, %xmm1
+    movss %xmm0, %xmm2
+    movss %xmm0, %xmm3
     callxt glClearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
