@@ -111,7 +111,7 @@ TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 
 .local gMaxAnisotropy
 .type gMaxAnisotropy, @object
-.comm gMaxAnisotropy, 4, 16 # uint
+.comm gMaxAnisotropy, 4, 16 # float
 
 # pragma pack for structs = no paddings
 
@@ -140,6 +140,21 @@ TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
 .local gUbo
 .type gUbo, @object
 .comm gUbo, 4, 16 # uint
+
+# typedef struct {
+#     GLuint id, texture;
+# } Fbo; // size = 4 + 4 = 8
+.local gMsaaFbo
+.type gMsaaFbo, @object
+.comm gMsaaFbo, 8, 16
+
+.local gPostprocessingFbo
+.type gPostprocessingFbo, @object
+.comm gPostprocessingFbo, 8, 16
+
+.local gPostprocessingTexquad
+.type gPostprocessingTexquad, @object
+.comm gPostprocessingTexquad, 38, 16
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -1011,6 +1026,214 @@ removeUbo:
     callxt glDeleteBuffers
 
     addq $8, %rsp # stack alignment
+    ret
+
+.align 16
+.type createFbos, @function
+createFbos:
+    endbr64
+    subq $8, %rsp # stack alignment
+
+    // msaa
+
+    movl $0x9100, %edi # GL_TEXTURE_2D_MULTISAMPLE
+    movl $1, %esi
+    leaq 4+gMsaaFbo(%rip), %rdx # &gMsaaFbo.texture
+    callxt glCreateTextures
+    movl 4+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
+    call assert
+
+    movl 4+gMsaaFbo(%rip), %edi # gMsaaFbo.texture
+    movl $4, %esi
+    movl $0x8058, %edx # GL_RGBA8
+    movl $WIDTH, %ecx
+    movl $HEIGHT, %r8d
+    movl $1, %r9d # GL_TRUE
+    callxt glTextureStorage2DMultisample
+
+    //
+
+    movl $1, %edi
+    leaq 0+gMsaaFbo(%rip), %rsi # &gMsaaFbo.id
+    callxt glCreateFramebuffers
+    movl 0+gMsaaFbo(%rip), %eax # gMsaaFbo.id
+    call assert
+
+    movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
+    movl 4+gMsaaFbo(%rip), %edx # gMsaaFbo.texture
+    xorl %ecx, %ecx
+    callxt glNamedFramebufferTexture
+
+    movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl $0x8d40, %esi # GL_FRAMEBUFFER
+    callxt glCheckNamedFramebufferStatus
+    testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
+    xorl %eax, %eax
+    setnz %al
+    call assert # // result == constant
+
+    // postprocessing
+
+    movl $0x0de1, %edi # GL_TEXTURE_2D
+    movl $1, %esi
+    leaq 4+gPostprocessingFbo(%rip), %rdx # &gPostprocessingFbo.texture
+    callxt glCreateTextures
+    movl 4+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
+    call assert
+
+    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
+    movl $0x2601, %edx # GL_LINEAR
+    callxt glTextureParameteri
+
+    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
+    movl $0x2601, %edx # GL_LINEAR
+    callxt glTextureParameteri
+
+    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
+    movss gMaxAnisotropy(%rip), %xmm0
+    callxt glTextureParameterf
+
+    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl $1, %esi
+    movl $0x8058, %edx # GL_RGBA8
+    movl $WIDTH, %ecx
+    movl $HEIGHT, %r8d
+    callxt glTextureStorage2D
+
+    //
+
+    movl $1, %edi
+    leaq 0+gPostprocessingFbo(%rip), %rsi # &gPostprocessingFbo.id
+    callxt glCreateFramebuffers
+    movl 0+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
+    call assert
+
+    movl 0+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
+    movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
+    movl 4+gPostprocessingFbo(%rip), %edx # gPostprocessingFbo.texture
+    xorl %ecx, %ecx
+    callxt glNamedFramebufferTexture
+
+    movl 0+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
+    movl $0x8d40, %esi # GL_FRAMEBUFFER
+    callxt glCheckNamedFramebufferStatus
+    testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
+    xorl %eax, %eax
+    setnz %al
+    call assert # // result == constant
+
+    //
+
+    addq $8, %rsp # stack alignment
+    ret
+
+.align 16
+.type removeFbos, @function
+removeFbos:
+    endbr64
+    subq $8, %rsp # stack alignment and vector of 2 uints
+
+    //
+
+    movl 4+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
+    movl %eax, 0(%rsp) # vector<uint>[0]
+    movl 4+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
+    movl %eax, 4(%rsp) # vector<uint>[1]
+
+    movl $2, %edi
+    leaq 0(%rsp), %rsi # &vector
+    callxt glDeleteTextures
+
+    movl 0+gMsaaFbo(%rip), %eax # gMsaaFbo.id
+    movl %eax, 0(%rsp) # vector<uint>[0]
+    movl 0+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
+    movl %eax, 4(%rsp) # vector<uint>[1]
+
+    movl $2, %edi
+    leaq 0(%rsp), %rsi # &vector
+    callxt glDeleteFramebuffers
+
+    //
+
+    addq $8, %rsp # stack alignment
+    ret
+
+.align 16
+.type togglePostprocessing, @function
+togglePostprocessing: # receives bool (4 bytes) onOrOff
+    endbr64
+    subq $8, %rsp # stack alignment
+    movl %edi, %edx # onOrOff?
+
+    movl 5+gPostprocessingTexquad(%rip), %edi # gPostprocessingTexquad.program
+    movl $2, %esi
+    # movl %edx, %edx
+    callxt glProgramUniform1i
+
+    addq $8, %rsp # stack alignment
+    ret
+
+.align 16
+.type createObjects, @function
+createObjects:
+    endbr64
+    CREATE_OBJECTS_STACK = 72 # // 8 alignment + 4 vectors of 4 floats of 4 bytes each = 8 + 4^3; 8(%rsp) = mat4 model
+    subq $CREATE_OBJECTS_STACK, %rsp
+
+    //
+
+    call createUbo
+    call createFbos
+
+    leaq 8(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+
+    //
+
+    # zeroing-out the object which is aligned itself
+    pxor %xmm0, %xmm0
+    movdqa %xmm0, 0+gPostprocessingTexquad(%rip)
+    movdqa %xmm0, 16+gPostprocessingTexquad(%rip)
+    movl $0, 32+gPostprocessingTexquad(%rip)
+    movw $0, 36+gPostprocessingTexquad(%rip)
+
+    movb $0, 0+gPostprocessingTexquad(%rip) # TYPE_TEXQUAD, gPostprocessingTexquad.type
+    # movl $0, 1+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.vao
+    # movl $0, 5+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.program
+    movl $0, 9+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.x
+    movl $0, 13+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.y
+    movl $WIDTH, 17+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.w
+    movl $HEIGHT, 21+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.h
+    # movl $0, 25+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.vbo
+    # movl $0, 29+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.ebo
+    # movl $0, 33+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture
+    # movb $0, 37+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.clip
+
+    leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
+    xorq %rsi, %rsi
+    leaq 8(%rsp), %rdx # &model
+    call createTexquad
+
+    movl 33+gPostprocessingTexquad(%rip), %eax # gPostprocessingTexquad.texture
+    movl %eax, 4+gPostprocessingFbo(%rip) # gPostprocessingFbo.texture
+
+    //
+
+    
+
+    //
+
+    addq $CREATE_OBJECTS_STACK, %rsp
+    ret
+
+.align 16
+.type removeObjects, @function
+removeObjects:
+    endbr64
     ret
 
 .align 16
