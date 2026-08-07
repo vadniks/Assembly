@@ -30,6 +30,7 @@ DEBUG_S = 0x0a7325 # // %s\n
 DEBUG_P = 0x0a7025 # // %p\n
 DEBUG_D = 0x0a6425 # // %p\n
 DEBUG_F = 0x0a6625 # // %f\n
+TEST_STR = 0x0a54534554 # // TEST\n
 
 .align 16
 .local SDL_HINT_VIDEO_DRIVER
@@ -77,30 +78,39 @@ UNIFORM_MODEL: .asciz "uModel"
 .type ENTRY_POINT, @object
 ENTRY_POINT: .asciz "main"
 
-#
+.align 16
+.local TEST_STR
+.type TEST_STR, @object
+TEST_STR: .asciz "TEST"
 
 .align 16
-.local TEST_VERTEX
-.type TEST_VERTEX, @object
-TEST_VERTEX: # TODO: replace with spirv bytecode
-    .ascii "#version 460 core\n"
-    .ascii "void main() {\n"
-    .ascii "gl_Position = vec4(0);\n"
-    .ascii "}\n"
-    .zero 1
-TEST_VERTEX_SIZE = (. - TEST_VERTEX)
+.local IMAGE_NAME
+.type IMAGE_NAME, @object
+IMAGE_NAME: .asciz "img.png"
 
 .align 16
-.local TEST_FRAGMENT
-.type TEST_FRAGMENT, @object
-TEST_FRAGMENT:
-    .ascii "#version 460 core\n"
-    .ascii "out vec4 oColor;\n"
-    .ascii "void main() {\n"
-    .ascii "oColor = vec4(0);\n"
-    .ascii "}\n"
-    .zero 1
-TEST_FRAGMENT_SIZE = (. - TEST_FRAGMENT)
+.local TEXQUAD_VERTEX
+.type TEXQUAD_VERTEX, @object
+TEXQUAD_VERTEX: .incbin "texquad.vert.spv"
+TEXQUAD_VERTEX_SIZE = (. - TEXQUAD_VERTEX)
+
+.align 16
+.local TEXQUAD_FRAGMENT
+.type TEXQUAD_FRAGMENT, @object
+TEXQUAD_FRAGMENT: .incbin "texquad.frag.spv"
+TEXQUAD_FRAGMENT_SIZE = (. - TEXQUAD_FRAGMENT)
+
+.align 16
+.local LINE_VERTEX
+.type LINE_VERTEX, @object
+LINE_VERTEX: .incbin "line.vert.spv"
+LINE_VERTEX_SIZE = (. - LINE_VERTEX)
+
+.align 16
+.local LINE_FRAGMENT
+.type LINE_FRAGMENT, @object
+LINE_FRAGMENT: .incbin "line.frag.spv"
+LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
@@ -600,14 +610,10 @@ createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being dest
 
     //
 
-    # movl $TEXQUAD_VERTEX_SHADER_SIZE, %edi // <-- TODO: replace with the real ones
-    movl $TEST_VERTEX_SIZE, %edi
-    # leaq TEXQUAD_VERTEX_SHADER(%rip), %rsi
-    leaq TEST_VERTEX(%rip), %rsi
-    # movl $TEXQUAD_FRAGMENT_SHADER_SIZE, %edx
-    movl $TEST_FRAGMENT_SIZE, %edx
-    # leaq TEXQUAD_FRAGMENT_SHADER(%rip), %rcx
-    leaq TEST_FRAGMENT(%rip), %rcx
+    movl $TEXQUAD_VERTEX_SIZE, %edi
+    leaq TEXQUAD_VERTEX(%rip), %rsi
+    movl $TEXQUAD_FRAGMENT_SIZE, %edx
+    leaq TEXQUAD_FRAGMENT(%rip), %rcx
     call makeShaders
     movq (%rsp), %rdi
     movl %eax, 5(%rdi) # &texquad->program
@@ -819,11 +825,10 @@ createLine: # receives Line*
 
     //
 
-    // TODO: replace with the real ones
-    movl $TEST_VERTEX_SIZE, %edi
-    leaq TEST_VERTEX(%rip), %rsi
-    movl $TEST_FRAGMENT_SIZE, %edx
-    leaq TEST_FRAGMENT(%rip), %rcx
+    movl $LINE_VERTEX_SIZE, %edi
+    leaq LINE_VERTEX(%rip), %rsi
+    movl $LINE_FRAGMENT_SIZE, %edx
+    leaq LINE_FRAGMENT(%rip), %rcx
     call makeShaders
     movl %eax, 5(%rbp) # line->program
 
@@ -1181,7 +1186,7 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
 .type createObjects, @function
 createObjects:
     endbr64
-    CREATE_OBJECTS_STACK = 72 # // 8 alignment + 4 vectors of 4 floats of 4 bytes each = 8 + 4^3; 8(%rsp) = mat4 model
+    CREATE_OBJECTS_STACK = 72 # // 8 alignment and SDL_Surface* + 4 vectors of 4 floats of 4 bytes each = 8 + 4^3; 8(%rsp) = mat4 model
     subq $CREATE_OBJECTS_STACK, %rsp
 
     //
@@ -1223,7 +1228,83 @@ createObjects:
 
     //
 
-    
+    leaq TEST_STR(%rip), %rdi
+    xorl %esi, %esi # false
+    call createTexture
+    movq %rax, (%rsp) # SDL_Surface*
+
+    movl $38, %edi # sizeof(Texquad)
+    movl $1, %esi # 1 byte
+    callxt calloc
+    movq %rax, 0+gObjects(%rip) # gObjects[0] = Texquad*
+
+    movb $0, 0(%rax) # TYPE_TEXQUAD, gObjects[0]->type
+    # movl $0, 1(%rax) # gObjects[0]->vao
+    # movl $0, 5(%rax) # gObjects[0]->program
+    movl $310, 9(%rax) # gObjects[0]->x
+    movl $310, 13(%rax) # gObjects[0]->y
+    movl $320, 17(%rax) # gObjects[0]->w
+    movl $320, 21(%rax) # gObjects[0]->h
+    # movl $0, 25(%rax) # gObjects[0]->vbo
+    # movl $0, 29(%rax) # gObjects[0]->ebo
+    # movl $0, 33(%rax) # gObjects[0]->texture
+    # movb $0, 37(%rax) # gObjects[0]->clip
+
+    movq %rax, %rdi # gObjects[0]
+    movq (%rsp), %rsi # SDL_Surface*
+    leaq 8(%rsp), %rdx # &model
+    call createTexquad
+
+    leaq 8(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+
+    //
+
+    leaq IMAGE_NAME(%rip), %rdi
+    movl $1, %esi # true
+    call createTexture
+    movq %rax, (%rsp) # SDL_Surface*
+
+    movl $38, %edi # sizeof(Texquad)
+    movl $1, %esi # 1 byte
+    callxt calloc
+    movq %rax, 8+gObjects(%rip) # gObjects[1] = Texquad*
+
+    movb $0, 0(%rax) # TYPE_TEXQUAD, gObjects[1]->type
+    # movl $0, 1(%rax) # gObjects[1]->vao
+    # movl $0, 5(%rax) # gObjects[1]->program
+    movl $50, 9(%rax) # gObjects[1]->x
+    movl $50, 13(%rax) # gObjects[1]->y
+    movl $320, 17(%rax) # gObjects[1]->w
+    movl $320, 21(%rax) # gObjects[1]->h
+    # movl $0, 25(%rax) # gObjects[1]->vbo
+    # movl $0, 29(%rax) # gObjects[1]->ebo
+    # movl $0, 33(%rax) # gObjects[1]->texture
+    movb $1, 37(%rax) # gObjects[1]->clip
+
+    movq %rax, %rdi # gObjects[1]
+    movq (%rsp), %rsi # SDL_Surface*
+    leaq 8(%rsp), %rdx # &model
+    call createTexquad
+
+    // ------------------------------------------------------------>>> TODO: don't use nonvolatile registers (rbp, rbx, ...) to avoid state store-restore
+
+    movl $29, %edi # sizeof(Line)
+    movl $1, %esi # 1 byte
+    callxt calloc
+    movq %rax, 16+gObjects(%rip) # gObjects[2] = Line*
+
+    movb $1, 0(%rax) # TYPE_LINE, gObjects[2]->type
+    # movl $0, 1(%rax) # gObjects[2]->vao
+    # movl $0, 5(%rax) # gObjects[2]->program
+    movl $500, 9(%rax) # gObjects[2]->x0
+    movl $100, 13(%rax) # gObjects[2]->y0
+    movl $600, 17(%rax) # gObjects[2]->x1
+    movl $100, 21(%rax) # gObjects[2]->y1
+    movl $10, 25(%rax) # gObjects[2]->width
+
+    movq %rax, %rdi
+    call createLine
 
     //
 
@@ -1234,6 +1315,29 @@ createObjects:
 .type removeObjects, @function
 removeObjects:
     endbr64
+    subq $8, %rsp # stack alignment and counter
+
+    movl $0, (%rsp)
+.LremoveObjects.loop:
+    movl (%rsp), %eax # counter (i)
+    leaq gObjects(%rip), %rdi # &gObjects[0]
+    movq (%rdi, %rax, 8), %rdi # gObjects[i]
+    xorl %esi, %esi # false
+    call processObject
+
+    incl (%rsp) # i++
+
+    cmpl $OBJECTS, (%rsp) # while i < OBJECTS
+    jl .LremoveObjects.loop
+
+    //
+
+    leaq gPostprocessingTexquad(%rip), %rdi
+    call removeTexquad
+    call removeFbos
+    call removeUbo
+
+    addq $8, %rsp # stack alignment
     ret
 
 .align 16
@@ -1241,11 +1345,14 @@ removeObjects:
 loop:
     endbr64
 
-    # 8 - window, 128 - event, 8 - ticks, 8 padding for stack alignment
+    # 8 - window, 128 - event, 8 - ticks, 4 postprocessingEnabled, 4 padding for stack alignment
     LOOP_STACK = 152
     subq $LOOP_STACK, %rsp
-    # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event
+    # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event, 144(%rsp) = postprocessingEnabled? 4 bytes
     movq %rdi, (%rsp)
+    movl $0, 144(%rsp)
+
+    call createObjects
 
 .Lloop.infiniteLoop:
     callxt SDL_GetTicks
@@ -1279,8 +1386,16 @@ loop:
 
     cmpl $0x300, 16(%rsp) # event.type SDL_EVENT_KEY_DOWN
     jne .Lloop.eventsLoop
+   
     cmpl $0x71, 16+28(%rsp) # event.key.key SDLK_Q
     je .Lloop.infiniteLoopEnd
+   
+    cmpl $0x60, 16+28(%rsp) # event.key.key SDLK_GRAVE
+    jne .Lloop.eventsLoopIgnoreKey
+    notl 144(%rsp)
+    movl 144(%rsp), %edi
+    call togglePostprocessing
+.Lloop.eventsLoopIgnoreKey:
 
     jmp .Lloop.eventsLoop
 
@@ -1296,6 +1411,10 @@ loop:
     jmp .Lloop.infiniteLoop
 
 .Lloop.infiniteLoopEnd:
+
+    call captureCanvas
+    call removeObjects
+
     addq $LOOP_STACK, %rsp
     ret
 
