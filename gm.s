@@ -436,6 +436,109 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     addq $MAKE_SHADERS_STACK, %rsp
     ret
 
+
+.align 16
+.type createTexquad, @function
+createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - pointer
+    endbr64
+    CREATE_TEXQUAD_STACK = 88 # // 0 alignment + 3 * 8 pointers + vec(4 * 4 floats * 4 bytes each)
+    subq $CREATE_TEXQUAD_STACK, %rsp
+    movq %rdi, (%rsp) # Texquad*
+    movq %rsi, 8(%rsp) # SDL_Surface*
+    movq %rdx, 16(%rsp) # model
+    # 24() vec4 vertices
+
+    //
+
+    # movq 8(%rsp), %rsi # SDL_Surface*
+    testq %rsi, %rsi # surface == null
+    jz .LcreateTexquad.skipTexture
+
+    movl $0x0de1, %edi # GL_TEXTURE_2D
+    movl $1, %esi
+    movq (%rsp), %rdx # Texquad*
+    leaq 33(%rdx), %rdx # &texquad->texture
+    callxt glCreateTextures
+    movq (%rsp), %rax # Texquad*
+    movl 33(%rax), %eax # texquad->texture
+    call assert
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    movl $0x2802, %esi # GL_TEXTURE_WRAP_S
+    movl $0x812f, %edx # GL_CLAMP_TO_EDGE
+    callxt glTextureParameteri
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    movl $0x2803, %esi # GL_TEXTURE_WRAP_T
+    movl $0x812f, %edx # GL_CLAMP_TO_EDGE
+    callxt glTextureParameteri
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
+    movl $0x2703, %edx # GL_LINEAR_MIPMAP_LINEAR
+    callxt glTextureParameteri
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
+    movl $0x2601, %edx # GL_LINEAR
+    callxt glTextureParameteri
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
+    movss gMaxAnisotropy(%rip), %xmm0
+    callxt glTextureParameterf
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    movl $1, %esi
+    movl $0x8058, %edx # GL_RGBA8
+    movq 8(%rsp), %rax # SDL_Surface*
+    movl 8(%rax), %ecx # surface->w
+    movl 12(%rax), %r8d # surface->h
+    callxt glTextureStorage2D
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    xorl %esi, %esi
+    xorl %edx, %edx
+    xorl %ecx, %ecx
+    movq 8(%rsp), %rax # SDL_Surface*
+    movl 8(%rax), %r8d # surface->w
+    movl 12(%rax), %r9d # surface->h
+    pushq 24(%rax) # // surface->pixels 9th
+    pushq $0x1401 # // GL_UNSIGNED_BYTE 8th
+    pushq $0x1908 # // GL_RGBA 7th
+    callxt glTextureSubImage2D
+
+    movq (%rsp), %rdi # Texquad*
+    movl 33(%rdi), %edi # texquad->texture
+    callxt glGenerateTextureMipmap
+
+    movq 8(%rsp), %rdi # SDL_Surface*
+    callxt SDL_DestroySurface
+    # surface is no more needed
+
+.LcreateTexquad.skipTexture:
+
+    //
+
+    movq (%rsp), %rax # Texquad*
+    # pinsrd 
+    insertps $0, 17(%rax), %xmm0 # texquad->w
+    insertps $1, 21(%rax), %xmm0 # texquad->h
+    cvtdq2ps %xmm0, %xmm0
+    # movl 
+
+    //
+
+    addq $CREATE_TEXQUAD_STACK, %rsp
+    ret
+
 # TODO: rewrite entirely!
 # .align 16
 # .type createTexquad, @function
@@ -928,9 +1031,10 @@ removeLine: # receives Line* line
 .type processObject, @function
 processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, esi)
     endbr64
-    subq $8, %rsp # stack alignment and bool
-    movl %esi, (%rsp) # renderOrDelete?
-    movq %rdi, %rbp # * object // <-------------------------------------------- TODO: remove use of nonvolatile registers
+    PROCESS_OBJECT_STACK = 24
+    subq $PROCESS_OBJECT_STACK, %rsp # stack alignment, 8() Object*, 16() bool, 20() padding
+    movq %rdi, 8(%rsp) # * object
+    movl %esi, 16(%rsp) # renderOrDelete?
 
     //
 
@@ -975,23 +1079,23 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     //
 
 .LprocessObject.end:
-    movl (%rsp), %eax # renderOrDelete?
+    movl 16(%rsp), %eax # renderOrDelete?
     testl %eax, %eax
     jnz .LprocessObject.end.noFree
-    movq %rbp, %rdi # * object
+    movq 8(%rsp), %rdi # * object
     callxt free
 .LprocessObject.end.noFree:
 
     //
 
-    addq $8, %rsp # stack alignment
+    addq $PROCESS_OBJECT_STACK, %rsp
     ret
 
 .align 16
 .type render, @function
 render:
     endbr64
-    nop
+    nop # // TODO
     ret
 
 .align 16
@@ -1304,8 +1408,6 @@ createObjects:
     movq (%rsp), %rsi # SDL_Surface*
     leaq 8(%rsp), %rdx # &model
     call createTexquad
-
-    // ------------------------------------------------------------>>> TODO: don't use nonvolatile registers (rbp, ...) to avoid state store-restore
 
     movl $29, %edi # sizeof(Line)
     movl $1, %esi # 1 byte
