@@ -527,267 +527,157 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
 
     //
 
+    # rax = Texquad*
+    # edi = 1.f
+    # esi = texquad->y
+    # edx = texquad->x
+
+    # xmm0: width, 1, height, - (ints)
+    # then: width, 1, height, - (floats)
     movq (%rsp), %rax # Texquad*
-    # pinsrd 
-    insertps $0, 17(%rax), %xmm0 # texquad->w
-    insertps $1, 21(%rax), %xmm0 # texquad->h
+    pinsrd $0, 17(%rax), %xmm0 # texquad->w
+    movl $1, %edi
+    pinsrd $1, %edi, %xmm0 # 1
+    pinsrd $2, 21(%rax), %xmm0 # texquad->h
     cvtdq2ps %xmm0, %xmm0
-    # movl 
+    extractps $1, %xmm0, %edi # 1.f
+    # xmm0: width, x, height, y (floats)
+    # then: width + x, height + y, -, - (floats)
+    pinsrd $1, 9(%rax), %xmm0 # texquad->x
+    pinsrd $3, 13(%rax), %xmm0 # texquad->y
+    haddps %xmm0, %xmm0 # xmm0[0] = xmm0[0] + xmm0[1], xmm0[1] = xmm0[2] + xmm0[3]
+
+    extractps $0, %xmm0, 24+0(%rsp) # vector[0] = x + w
+    extractps $1, %xmm0, 24+4(%rsp) # vector[1] = y + h
+    movl %edi, 24+8(%rsp) # vector[2] = 1.f
+    movl %edi, 24+12(%rsp) # vector[3] = 1.f
+    #
+    extractps $0, %xmm0, 24+16(%rsp) # vector[4] = x + w
+    movl 13(%rax), %esi # texquad->y
+    movl %esi, 24+20(%rsp) # vector[5] = texquad->y
+    movl %edi, 24+24(%rsp) # vector[6] = 1.f
+    movl $0, 24+28(%rsp) # vector[7] = 0.f
+    #
+    movl 9(%rax), %edx # texquad->x
+    movl %edx, 24+32(%rsp) # vector[8] = texquad->x
+    movl %esi, 24+36(%rsp) # vector[9] = texquad->y
+    movl $0, 24+40(%rsp) # vector[10] = 0.f
+    movl $0, 24+44(%rsp) # vector[11] = 0.f
+    #
+    movl %edx, 24+48(%rsp) # vector[12] = texquad->x
+    extractps $1, %xmm0, 24+52(%rsp) # vector[13] = y + h
+    movl $0, 24+56(%rsp) # vector[14] = 0.f
+    movl %edi, 24+60(%rsp) # vector[15] = 1.f
+
+    //
+
+    leaq 1(%rax), %rdi # &texquad->vao
+    leaq 25(%rax), %rsi # &texquad->vbo
+    leaq 29(%rax), %rdx # &texquad->ebo
+    movl $64, %ecx # sizeof(vertices)
+    leaq 24(%rsp), %r8 # &vector
+    call bootstrapQuad
+
+    movq (%rsp), %rax # Texquad*
+    movl 1(%rax), %edi # texquad->vao
+    xorl %esi, %esi
+    movl 25(%rax), %edx # texquad->vbo
+    xorl %ecx, %ecx
+    movl $16, %r8d # 4 * sizeof(float)
+    callxt glVertexArrayVertexBuffer
+
+    //
+
+    movq (%rsp), %rax # Texquad*
+    movl 1(%rax), %edi # texquad->vao
+    xorl %esi, %esi
+    movl $4, %edx
+    movl $0x1406, %ecx # GL_FLOAT
+    xorl %r8d, %r8d # GL_FALSE
+    xorl %r9d, %r9d
+    callxt glVertexArrayAttribFormat
+
+    movq (%rsp), %rax # Texquad*
+    movl 1(%rax), %edi # texquad->vao
+    xorl %esi, %esi
+    xorl %edx, %edx
+    callxt glVertexArrayAttribBinding
+
+    movq (%rsp), %rax # Texquad*
+    movl 1(%rax), %edi # texquad->vao
+    xorl %esi, %esi
+    callxt glEnableVertexArrayAttrib
+
+    //
+
+    movl $TEXQUAD_VERTEX_SIZE, %edi
+    leaq TEXQUAD_VERTEX(%rip), %rsi
+    movl $TEXQUAD_FRAGMENT_SIZE, %edx
+    leaq TEXQUAD_FRAGMENT(%rip), %rcx
+    call makeShaders
+    movq (%rsp), %rdi # Texquad*
+    movl %eax, 5(%rdi) # texquad->program = result
+
+    //
+
+    movq (%rsp), %rax # Texquad*
+    movb 37(%rax), %dil # texquad->clip
+    testb %dil, %dil
+    jz .LcreateTexquad.skipTempVector
+
+    # xmm0: texquad->w, -, texquad->h, - (ints)
+    # then: ... (floats)
+    pinsrd $0, 17(%rax), %xmm0 # xmm0[0] = texquad->w
+    pinsrd $2, 21(%rax), %xmm0 # xmm0[2] = texquad->h
+    cvtdq2ps %xmm0, %xmm0
+    # xmm1: 2.f, -, 2.f, - (floats)
+    movl $0x40000000, %edi # 2.f
+    pinsrd $0, %edi, %xmm1
+    pinsrd $2, %edi, %xmm1
+    # xmm0: texquad->w / 2.f, -, texquad->h / 2.f, - (floats)
+    divps %xmm1, %xmm0
+    movaps %xmm0, %xmm1 # copy xmm0 to xmm1
+
+    # xmm0: wHalf, -, hHalf, - (floats)
+    # then: wHalf, x, hHalf, y (floats)
+    pinsrd $1, 9(%rax), %xmm0 # texquad->x
+    pinsrd $3, 13(%rax), %xmm0 # texquad->y
+    # xmm0: wHalf + x, hHalf + y, -, - (floats)
+    haddps %xmm0, %xmm0
+
+    # 24() vec4(4 floats) temp
+    extractps $0, %xmm0, 24+0(%rsp) # vector[0] = x + wHalf
+    extractps $1, %xmm0, 24+4(%rsp) # vector[1] = y + hHalf
+    extractps $0, %xmm1, 24+8(%rsp) # vector[2] = wHalf
+    extractps $2, %xmm1, 24+12(%rsp) # vector[3] = hHalf
+.LcreateTexquad.skipTempVector:
+    # 24() vec4(4 floats) temp, zero it out
+    movq $0, 24(%rsp)
+    movq $0, 32(%rsp)
+
+    //
+
+    # movq (%rsp), %rax # Texquad*
+    movl 5(%rax), %edi # texquad->program
+    movl $3, %esi
+    movl $1, %edx
+    leaq 24(%rsp), %rcx # &vector
+    callxt glProgramUniform4fv
+
+    //
+
+    movq (%rsp), %rax # Texquad*
+    movl 5(%rax), %edi # texquad->program
+    xorl %esi, %esi
+    movl $1, %edx
+    xorl %ecx, %ecx # GL_FALSE
+    movq 16(%rsp), %r8 # mat4* model
+    callxt glProgramUniformMatrix4fv
 
     //
 
     addq $CREATE_TEXQUAD_STACK, %rsp
     ret
-
-# TODO: rewrite entirely!
-# .align 16
-# .type createTexquad, @function
-# createTexquad: # Texquad* texquad, SDL_Surface* nullable surface - is being destroyed here, const float* model
-#     endbr64
-
-#     # 8 texquad + 8 surface + 8 model + 8 texquad->texture ptr/val + 8 padding for stack alignment
-#     CREATE_TEXQUAD_STACK = 24
-#     subq CREATE_TEXQUAD_STACK, %rsp
-
-#     movq %rdi, (%rsp)
-#     movq %rsi, 8(%rsp)
-#     movq %rdx, 16(%rsp)
-
-#     //
-    
-#     testq %rsi, %rsi
-#     jz .LcreateTexquad.bootstrap # // surface == null
-
-#     //
-
-#     leaq 33(%rsp), %rax # &texquad->texture
-#     movq %rax, 24(%rsp)
-
-#     movl $0xde1, %edi # GL_TEXTURE_2D
-#     movl $1, %esi
-#     movq %rbp, %rdx
-#     callxt glCreateTextures # // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-#     movl (%rbp), %eax
-#     call assert
-
-#     movl (%rbp), %ebp # texquad->texture
-
-#     movl %ebp, %edi
-#     movl $0x2802, %esi # GL_TEXTURE_WRAP_S
-#     movl $0x812f, %edx # GL_CLAMP_TO_EDGE
-#     callxt glTextureParameteri
-
-#     movl %ebp, %edi
-#     movl $0x2803, %esi # GL_TEXTURE_WRAP_T
-#     movl $0x812f, %edx # GL_CLAMP_TO_EDGE
-#     callxt glTextureParameteri
-
-#     movl %ebp, %edi
-#     movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
-#     movl $0x2703, %edx # GL_LINEAR_MIPMAP_LINEAR
-#     callxt glTextureParameteri
-
-#     movl %ebp, %edi
-#     movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
-#     movl $0x2601, %edx # GL_LINEAR
-#     callxt glTextureParameteri
-
-#     movl %ebp, %edi
-#     movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
-#     movss gMaxAnisotropy(%rip), %xmm0
-#     callxt glTextureParameteri
-
-#     movl %ebp, %edi
-#     movl $1, %esi
-#     movl $0x8058, %edx # GL_RGBA8
-#     movq 8(%rsp), %rcx
-#     movl 8(%rcx), %ecx # surface->w
-#     movq 8(%rsp), %r8
-#     movl 12(%r8), %r8d  # surface->h
-#     callxt glTextureStorage2D
-
-#     movl %ebp, %edi
-#     xorl %esi, %esi
-#     xorl %esi, %edx
-#     xorl %esi, %ecx
-#     movq 8(%rsp), %r8
-#     movl 8(%r8), %r8d # surface->w
-#     movq 8(%rsp), %r9
-#     movl 12(%r9), %r9d # surface->h
-#     subq $8, %rsp # stack alignment // TODO: align the stack everywhere there's any push and more than 6 arguments for a function <--------------------------------------------------------------------
-#     pushq $24 # // surface->pixels # // 9th
-#     pushq $0x1401 # // GL_UNSIGNED_BYTE # 8th
-#     pushq $0x1908 # // GL_RGBA # 7th
-#     callxt glTextureSubImage2D # // arguments go on stack in reverse order
-#     addq $32, %rsp # free arguments
-
-#     movl %ebp, %edi
-#     callxt glGenerateTextureMipmap
-
-#     movq 8(%rsp), %rdi
-#     callxt SDL_DestroySurface
-
-# .LcreateTexquad.bootstrap:
-
-#     pxor %xmm0, %xmm0
-#     pxor %xmm1, %xmm1
-
-#     movq (%rsp), %rdi
-#     pinsrd $0, 9(%rdi), %xmm0 # texquad->x float
-#     #
-#     movq (%rsp), %rsi
-#     pinsrd $1, 13(%rsi), %xmm0 # texquad->y float
-#     #
-#     movq (%rsp), %rdx
-#     pinsrd $0, 17(%rdx), %xmm1 # texquad->w long starting at the lower 4 bytes of the lower 8 bytes
-#     #
-#     movq (%rsp), %rcx
-#     pinsrd $1, 21(%rcx), %xmm1 # texquad->h long starting at the upper 4 bytes of the lower 8 bytes
-
-#     cvtdq2ps %xmm1, %xmm1 # convert longwords in xmm1 to single precision floats and store them in xmm1
-#     addps %xmm0, %xmm1 # sum all floats at once, store them in xmm1
-
-#     # TODO: replace movd with vmovsd
-
-#     CREATE_TEXQUAD_STACK2 = 64 # // also add CREATE_TEXQUAD_STACK from previous allocation
-#     subq $CREATE_TEXQUAD_STACK2, %rsp # 64 bytes for actual vertices + zero bytes padding for stack alignment
-
-#     pextrd $0, %xmm1, CREATE_TEXQUAD_STACK+0(%rsp) # x + w
-#     pextrd $1, %xmm1, CREATE_TEXQUAD_STACK+4(%rsp) # y + h
-#     movl $0x3f800000, CREATE_TEXQUAD_STACK+8(%rsp) # 1.f
-#     movl $0x3f800000, CREATE_TEXQUAD_STACK+12(%rsp) # 1.f
-#     #
-#     pextrd $0, %xmm1, CREATE_TEXQUAD_STACK+16(%rsp) # x + w
-#     pextrd $1, %xmm0, CREATE_TEXQUAD_STACK+20(%rsp) # y
-#     movl $0x3f800000, CREATE_TEXQUAD_STACK+24(%rsp) # 1.f
-#     movl $0, CREATE_TEXQUAD_STACK+28(%rsp) # 0.f
-#     #
-#     pextrd $0, %xmm0, CREATE_TEXQUAD_STACK+32(%rsp) # x
-#     pextrd $1, %xmm0, CREATE_TEXQUAD_STACK+36(%rsp) # y
-#     movl $0, CREATE_TEXQUAD_STACK+40(%rsp) # 0.f
-#     movl $0, CREATE_TEXQUAD_STACK+44(%rsp) # 0.f
-#     #
-#     pextrd $0, %xmm0, CREATE_TEXQUAD_STACK+48(%rsp) # x
-#     pextrd $1, %xmm1, CREATE_TEXQUAD_STACK+52(%rsp) # y + h
-#     movl $0, CREATE_TEXQUAD_STACK+56(%rsp) # 0.f
-#     movl $0x3f800000, CREATE_TEXQUAD_STACK+60(%rsp) # 1.f
-
-#     movq (%rsp), %rdi
-#     addq $1, %rdi # &texquad->vao
-#     movq (%rsp), %rsi
-#     addq $25, %rsi # &texquad->vbo
-#     movq (%rsp), %rdx
-#     addq $29, %rdx # &texquad->ebo
-#     movl $64, %ecx # sizeof(vertices)
-#     leaq CREATE_TEXQUAD_STACK(%rsp), %r8 # &vertices
-#     call bootstrapQuad
-
-#     addq $CREATE_TEXQUAD_STACK2, %rsp # drop vertices
-
-#     movq (%rsp), %rdi
-#     movl 1(%rdi), %edi # texquad->vao
-#     movl %edi, %ebp # texquad->vao
-#     xorl %esi, %esi
-#     movq (%rsp), %rdx
-#     movl 25(%rdx), %edx # texquad->vbo
-#     xorl %ecx, %ecx
-#     movl $16, %r8d
-#     callxt glVertexArrayVertexBuffer
-
-#     //
-
-#     movl %ebp, %edi # texquad->vao
-#     xorl %esi, %esi
-#     movl $4, %edx
-#     movl $0x1406, %ecx # GL_FLOAT
-#     xorl %r8d, %r8d
-#     xorl %r9d, %r9d
-#     callxt glVertexArrayAttribFormat
-
-#     movl %ebp, %edi # texquad->vao
-#     xorl %esi, %esi
-#     xorl %edx, %edx
-#     callxt glVertexArrayAttribBinding
-
-#     movl %ebp, %edi # texquad->vao
-#     xorl %esi, %esi
-#     callxt glEnableVertexArrayAttrib
-
-#     //
-
-#     movl $TEXQUAD_VERTEX_SIZE, %edi
-#     leaq TEXQUAD_VERTEX(%rip), %rsi
-#     movl $TEXQUAD_FRAGMENT_SIZE, %edx
-#     leaq TEXQUAD_FRAGMENT(%rip), %rcx
-#     call makeShaders
-#     movq (%rsp), %rdi
-#     movl %eax, 5(%rdi) # &texquad->program
-#     movl %eax, %ebp # texquad->program
-
-#     //
-
-#     pxor %xmm0, %xmm0
-
-#     movq (%rsp), %rax
-#     pinsrd $0, 17(%rax), %xmm0 # texquad->w
-#     movq (%rsp), %rax
-#     pinsrd $1, 21(%rax), %xmm0 # texquad->h
-
-#     movabs $0x4000000040000000, %rax # two 2.f floats in hex (little endian)
-#     movq %rax, %xmm1
-
-#     cvtdq2ps %xmm0, %xmm0 # convert longwords to floats (4 bytes each)
-#     divps %xmm1, %xmm0 # wHalf and hHalf are in the 0-64 bits of xmm0
-
-#     movq (%rsp), %rax
-#     pinsrd $0, 9(%rax), %xmm1 # texquad->x
-#     movq (%rsp), %rax
-#     pinsrd $1, 13(%rax), %xmm1 # texquad->y
-
-#     movq (%rsp), %rax
-#     movb 37(%rax), %al # texquad->clip
-#     testb %al, %al
-#     jnz .LcreateTexquad.useClip # // if texquad->clip = true
-#     pxor %xmm1, %xmm1 # vec4(0.f) in xmm1
-#     jmp .LcreateTexquad.endClip
-# .LcreateTexquad.useClip: # TODO: optimize
-#     addps %xmm0, %xmm1 # texquad->x + wHalf, texquad->y + hHalf in xmm1
-#     movlhps %xmm0, %xmm1
-# .LcreateTexquad.endClip:
-
-#     movl %ebp, %edi # texquad->program
-#     leaq UNIFORM_CLIP(%rip), %rsi
-#     callxt glGetUniformLocation
-
-#     CREATE_TEXQUAD_STACK3 = 16 # // also add CREATE_TEXQUAD_STACK from previous allocation
-#     subq $CREATE_TEXQUAD_STACK3, %rsp # 4 floats + zero padding
-#     movaps %xmm0, CREATE_TEXQUAD_STACK(%rsp)
-
-#     movl %ebp, %edi # texquad->program
-#     movl %eax, %esi # clip uniform location
-#     movl $1, %edx
-#     leaq CREATE_TEXQUAD_STACK(%rsp), %rcx
-#     callxt glProgramUniform4fv
-
-#     addq $CREATE_TEXQUAD_STACK3, %rsp
-
-#     //
-
-#     movl %ebp, %edi # texquad->program
-#     leaq UNIFORM_MODEL(%rip), %rsi
-#     callxt glGetUniformLocation
-
-#     movl %ebp, %edi # texquad->program
-#     movl %eax, %esi # model uniform location
-#     movl $1, %edx
-#     xorl %ecx, %ecx
-#     movq 16(%rsp), %r8 # float* model
-#     callxt glProgramUniformMatrix4fv
-
-#     //
-
-#     addq CREATE_TEXQUAD_STACK, %rsp
-#     ret
 
 .align 16
 .type createTexture, @function
