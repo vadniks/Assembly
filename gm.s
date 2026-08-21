@@ -510,10 +510,12 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     movq 8(%rsp), %rax # SDL_Surface*
     movl 8(%rax), %r8d # surface->w
     movl 12(%rax), %r9d # surface->h
+    pushq $0 # // stack alignment
     pushq 24(%rax) # // surface->pixels 9th
     pushq $0x1401 # // GL_UNSIGNED_BYTE 8th
     pushq $0x1908 # // GL_RGBA 7th
     callxt glTextureSubImage2D
+    addq $32, %rsp # free stack memory
 
     movq (%rsp), %rdi # Texquad*
     movl 33(%rdi), %edi # texquad->texture
@@ -985,7 +987,65 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 .type render, @function
 render:
     endbr64
-    nop # // TODO
+    subq $8, %rsp # stack alignment and temp variable
+
+    movl $0x8ca9, %edi # GL_DRAW_FRAMEBUFFER
+    movl 0+gMsaaFbo(%rip), %esi # gMsaaFbo.id
+    callxt glBindFramebuffer
+
+    //
+
+    movl $0x3f80000, %eax # 1.f
+    movd %eax, %xmm0
+    movd %eax, %xmm1
+    movd %eax, %xmm2
+    movd %eax, %xmm3
+    callxt glClearColor
+
+    movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
+    callxt glClear
+
+    //
+
+    movl $0, (%rsp) # counter = 0
+.Lrender.loop:
+    movq 0+gObjects(%rip), %rdi # gObjects[0]; Object*
+    movl (%rsp), %esi # counter
+    imull $8, %esi
+    addq %rsi, %rdi # object* + counter * 8 -> gObject[counter]
+    movl $1, %esi # true
+    call processObject
+
+    incl (%rsp) # counter++
+    cmpl $OBJECTS, (%rsp)
+    jl .Lrender.loop # // if (counter < OBJECTS) repeat
+
+    //
+
+    movl $0x8ca9, %edi # GL_DRAW_FRAMEBUFFER
+    xorl %esi, %esi
+    callxt glBindFramebuffer
+
+    subq $56, %rsp # 6 arguments + alignment
+    movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl 0+gPostprocessingFbo(%rip), %esi # gPostprocessingFbo.id
+    xorl %edx, %edx
+    xorl %ecx, %ecx
+    movl $WIDTH, %r8d
+    movl $HEIGHT, %r9d
+    movl $0, 40(%rsp) # args are put in reverse order after 6th one
+    movl $0, 32(%rsp)
+    movl $WIDTH, 24(%rsp)
+    movl $HEIGHT, 16(%rsp)
+    movl $0x4000, 8(%rsp) # GL_COLOR_BUFFER_BIT
+    movl $0x2600, 0(%rsp) # GL_NEAREST
+    callxt glBlitNamedFramebuffer
+    addq $56, %rsp # free stack memmory
+
+    leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
+    call renderTexquad
+
+    addq $8, %rsp
     ret
 
 .align 16
@@ -1207,7 +1267,7 @@ createObjects:
     call createFbos
 
     leaq 8(%rsp), %rdi # &model
-    callxt glmc_mat4_identity # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    callxt glmc_mat4_identity
 
     //
 
