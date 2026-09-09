@@ -123,7 +123,7 @@ LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 .type gMaxAnisotropy, @object
 .comm gMaxAnisotropy, 4, 16 # float
 
-# pragma pack for structs = no paddings
+# pragma pack for structs = no paddings # <---------------- TODO: actually align fields in structures
 
 # typedef enum : byte {TYPE_TEXQUAD, TYPE_LINE} Type; // size = 1
 
@@ -182,13 +182,24 @@ LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
     popq %rax
 .endm
 
+.macro debug s, c # // string (in a form of bytes in a number (8 bytes long max)), count; example: debug 0x0a61, 2 // "a\n"
+    pushq $\s
+    movl $1, %eax
+    movl $1, %edi
+    movq %rsp, %rsi
+    movl $\c, %edx
+    syscall
+    popq %rax
+.endm
+
 .align 16
 .type assert, @function
 assert: # first parameter int is in the eax for optimization's sake
     endbr64
     testl %eax, %eax
     jnz .Lassert.ret
-    callxt abort
+    ud2
+    # callxt abort
 .Lassert.ret:
     ret
 
@@ -197,7 +208,7 @@ assert: # first parameter int is in the eax for optimization's sake
 captureCanvas:
     endbr64
 
-    CAPTURE_CANVAS_STACK = 8 + WIDTH * HEIGHT * 4 # // 0(): stack alignment, pointer to the buffer - 7th argument and later (all in one) - SDL_Surface*, 8() buffer
+    CAPTURE_CANVAS_STACK = 16 + WIDTH * HEIGHT * 4 + 8 # // 0(): stack alignment, pointer to the buffer - 7th argument and later (all in one) - SDL_Surface*, 8() padding for buffer, 16() buffer, ...() padding
     subq $CAPTURE_CANVAS_STACK, %rsp
 
     //
@@ -208,18 +219,18 @@ captureCanvas:
     movl $HEIGHT, %ecx
     movl $0x1908, %r8d # GL_RGBA
     movl $0x1401, %r9d # GL_UNSIGNED_BYTE
-    leaq 8(%rsp), %rax # &buffer{}
+    leaq 16(%rsp), %rax # &buffer{}
     movq %rax, (%rsp) # buffer addr, must be on the stack as 7th arg
     callxt glReadPixels
 
     movl $WIDTH, %edi
     movl $HEIGHT, %esi
     movl $0x16762004, %edx # SDL_PIXELFORMAT_RGBA32
-    leaq 8(%rsp), %rcx # &buffer{}
+    leaq 16(%rsp), %rcx # &buffer{}
     leal WIDTH(%edi, %edi, 2), %r8d # // WIDTH + (WIDTH + WIDTH * 2) = WIDTH=edi * 4
     callxt SDL_CreateSurfaceFrom
-    call assert
     movq %rax, (%rsp) # SDL_Surface* surface
+    call assert
 
     movq (%rsp), %rdi # SDL_Surface* surface
     movl $2, %esi # SDL_FLIP_VERTICAL
@@ -289,7 +300,8 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movl (%rax), %eax
     call assert
 
-    movl 16(%rsp), %edi
+    movq 16(%rsp), %rdi
+    movl (%rdi), %edi
     movl $BOOTSTRAP_QUAD_INDICES_SIZE, %esi
     leaq BOOTSTRAP_QUAD_INDICES(%rip), %rdx
     xorl %ecx, %ecx
@@ -325,11 +337,11 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     movl $0, 36(%rsp)
 
     //
-    
+
     movl $0x8b31, %edi # GL_VERTEX_SHADER
     callxt glCreateShader
-    call assert
     movl %eax, 24(%rsp)
+    call assert
 
     movl $1, %edi
     leaq 24(%rsp), %rsi
@@ -356,13 +368,13 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
 
     movl $0x8b30, %edi # GL_FRAGMENT_SHADER
     callxt glCreateShader
-    call assert
     movl %eax, 28(%rsp)
+    call assert
 
     movl $1, %edi
     leaq 28(%rsp), %rsi
     movl $0x9551, %edx # GL_SHADER_BINARY_FORMAT_SPIR_V
-    movl 16(%rsp), %ecx
+    movq 16(%rsp), %rcx
     movl 12(%rsp), %r8d
     callxt glShaderBinary
 
@@ -376,15 +388,15 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     movl 28(%rsp), %edi
     movl $0x8b81, %esi # GL_COMPILE_STATUS
     leaq 36(%rsp), %rdx
-    callxt glGetShaderiv
+    callxt glGetShaderiv # // <<< sigsegv
     movl 36(%rsp), %eax
     call assert
 
     //
 
     callxt glCreateProgram
-    call assert
     movl %eax, 32(%rsp)
+    call assert
 
     movl 32(%rsp), %edi
     movl 24(%rsp), %esi
@@ -436,17 +448,16 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     addq $MAKE_SHADERS_STACK, %rsp
     ret
 
-
-.align 16
+.align 16 # TODO: all buffers need to be aligned on a 16 bytes boundary, heap allocator does this internally and for stack based buffers we need to do this ourselves
 .type createTexquad, @function
 createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - pointer
     endbr64
-    CREATE_TEXQUAD_STACK = 88 # // 0 alignment + 3 * 8 pointers + vec(4 * 4 floats * 4 bytes each)
+    CREATE_TEXQUAD_STACK = 104 # // 0 alignment + 3 * 8 pointers + vec(4 * 4 floats * 4 bytes each) + 16 padding
     subq $CREATE_TEXQUAD_STACK, %rsp
     movq %rdi, (%rsp) # Texquad*
     movq %rsi, 8(%rsp) # SDL_Surface*
     movq %rdx, 16(%rsp) # model
-    # 24() vec4 vertices
+    # 32() vec4 vertices
 
     //
 
@@ -549,27 +560,27 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     pinsrd $3, 13(%rax), %xmm0 # texquad->y
     haddps %xmm0, %xmm0 # xmm0[0] = xmm0[0] + xmm0[1], xmm0[1] = xmm0[2] + xmm0[3]
 
-    extractps $0, %xmm0, 24+0(%rsp) # vector[0] = x + w
-    extractps $1, %xmm0, 24+4(%rsp) # vector[1] = y + h
-    movl %edi, 24+8(%rsp) # vector[2] = 1.f
-    movl %edi, 24+12(%rsp) # vector[3] = 1.f
+    extractps $0, %xmm0, 32+0(%rsp) # vector[0] = x + w
+    extractps $1, %xmm0, 32+4(%rsp) # vector[1] = y + h
+    movl %edi, 32+8(%rsp) # vector[2] = 1.f
+    movl %edi, 32+12(%rsp) # vector[3] = 1.f
     #
-    extractps $0, %xmm0, 24+16(%rsp) # vector[4] = x + w
+    extractps $0, %xmm0, 32+16(%rsp) # vector[4] = x + w
     movl 13(%rax), %esi # texquad->y
-    movl %esi, 24+20(%rsp) # vector[5] = texquad->y
-    movl %edi, 24+24(%rsp) # vector[6] = 1.f
-    movl $0, 24+28(%rsp) # vector[7] = 0.f
+    movl %esi, 32+20(%rsp) # vector[5] = texquad->y
+    movl %edi, 32+24(%rsp) # vector[6] = 1.f
+    movl $0, 32+28(%rsp) # vector[7] = 0.f
     #
     movl 9(%rax), %edx # texquad->x
-    movl %edx, 24+32(%rsp) # vector[8] = texquad->x
-    movl %esi, 24+36(%rsp) # vector[9] = texquad->y
-    movl $0, 24+40(%rsp) # vector[10] = 0.f
-    movl $0, 24+44(%rsp) # vector[11] = 0.f
+    movl %edx, 32+32(%rsp) # vector[8] = texquad->x
+    movl %esi, 32+36(%rsp) # vector[9] = texquad->y
+    movl $0, 32+40(%rsp) # vector[10] = 0.f
+    movl $0, 32+44(%rsp) # vector[11] = 0.f
     #
-    movl %edx, 24+48(%rsp) # vector[12] = texquad->x
-    extractps $1, %xmm0, 24+52(%rsp) # vector[13] = y + h
-    movl $0, 24+56(%rsp) # vector[14] = 0.f
-    movl %edi, 24+60(%rsp) # vector[15] = 1.f
+    movl %edx, 32+48(%rsp) # vector[12] = texquad->x
+    extractps $1, %xmm0, 32+52(%rsp) # vector[13] = y + h
+    movl $0, 32+56(%rsp) # vector[14] = 0.f
+    movl %edi, 32+60(%rsp) # vector[15] = 1.f
 
     //
 
@@ -577,7 +588,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     leaq 25(%rax), %rsi # &texquad->vbo
     leaq 29(%rax), %rdx # &texquad->ebo
     movl $64, %ecx # sizeof(vertices)
-    leaq 24(%rsp), %r8 # &vector
+    leaq 32(%rsp), %r8 # &vector
     call bootstrapQuad
 
     movq (%rsp), %rax # Texquad*
@@ -647,15 +658,15 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     # xmm0: wHalf + x, hHalf + y, -, - (floats)
     haddps %xmm0, %xmm0
 
-    # 24() vec4(4 floats) temp
-    extractps $0, %xmm0, 24+0(%rsp) # vector[0] = x + wHalf
-    extractps $1, %xmm0, 24+4(%rsp) # vector[1] = y + hHalf
-    extractps $0, %xmm1, 24+8(%rsp) # vector[2] = wHalf
-    extractps $2, %xmm1, 24+12(%rsp) # vector[3] = hHalf
+    # 32() vec4(4 floats) temp # xxx
+    extractps $0, %xmm0, 32+0(%rsp) # vector[0] = x + wHalf
+    extractps $1, %xmm0, 32+4(%rsp) # vector[1] = y + hHalf
+    extractps $0, %xmm1, 32+8(%rsp) # vector[2] = wHalf
+    extractps $2, %xmm1, 32+12(%rsp) # vector[3] = hHalf
 .LcreateTexquad.skipTempVector:
-    # 24() vec4(4 floats) temp, zero it out
-    movq $0, 24(%rsp)
+    # 32() vec4(4 floats) temp, zero it out
     movq $0, 32(%rsp)
+    movq $0, 40(%rsp)
 
     //
 
@@ -663,7 +674,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     movl 5(%rax), %edi # texquad->program
     movl $3, %esi
     movl $1, %edx
-    leaq 24(%rsp), %rcx # &vector
+    leaq 32(%rsp), %rcx # &vector
     callxt glProgramUniform4fv
 
     //
@@ -709,16 +720,16 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movl $0x7f7f7fff, %ecx # (SDL_Color) {127, 127, 127, 255}
     callxt TTF_RenderText_Blended
 .LcreateTexture.endCondition:
-    call assert
     movq %rax, 12(%rsp) # temp surface
+    call assert
 
     //
 
     movq %rax, %rdi # temp surface
     movl $0x16762004, %esi # SDL_PIXELFORMAT_RGBA32
     callxt SDL_ConvertSurface
-    call assert
     movq %rax, 20(%rsp) # converted surface
+    call assert
 
     movq 12(%rsp), %rdi
     callxt SDL_DestroySurface
@@ -746,12 +757,12 @@ renderTexquad: # receives Texquad*
     //
 
     #movq %rdi, %rdi
-    addq $5, %rdi # &texquad->program
+    leaq 5(%rdi), %rdi # Texquad* + 5 = &texquad->program
     callxt glUseProgram
 
     movl $0x0de1, %edi # GL_TEXTURE_2D
     movq (%rsp), %rsi # Texquad*
-    addq $33, %rsi # &texquad->texture
+    leaq 33(%rsi), %rsi # Texquad* + 33 = &texquad->texture
     callxt glBindTexture
 
     movq (%rsp), %rax # Texquad*
@@ -810,15 +821,15 @@ removeTexquad: # receives Texquad*
     leaq 1(%rax), %rsi # &texquad->vao
     callxt glDeleteVertexArrays
 
-    addq $REMOVE_TEXQUAD_STACK, %rsp # ------------------------------------------------> TODO: check and correct all struct dereferences through pointers to structs: a = Struct* -> mem; b = a->field or &a->field -> reg
+    addq $REMOVE_TEXQUAD_STACK, %rsp
     ret
 
 .align 16
 .type createLine, @object
 createLine: # receives Line*
     endbr64
-    CREATE_LINE_STACK = 24
-    subq $CREATE_LINE_STACK, %rsp # stack alignment and 0() Line*, 8() vector(4 * floats)
+    CREATE_LINE_STACK = 40
+    subq $CREATE_LINE_STACK, %rsp # stack alignment and 0() Line*, 8() padding, 16() vector(4 * floats) + padding
     movq %rdi, (%rsp) # Line*
 
     movl $1, %edi
@@ -846,7 +857,7 @@ createLine: # receives Line*
     xorl %esi, %esi
     movl $1, %edx
     movq (%rsp), %rcx # Line*
-    leaq 9(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1)
+    leaq 9(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # <---------- TODO: unligned in struct
     callxt glProgramUniform4fv
 
     movq (%rsp), %rax # Line*
@@ -859,11 +870,11 @@ createLine: # receives Line*
     movl 5(%rdi), %edi # line->program
     movl $2, %esi
     movl $1, %edx
-    movl $0, 8+0(%rsp)
-    movl $0x3f800000, 8+4(%rsp) # 1.f
-    movl $0, 8+8(%rsp)
-    movl $0x3f800000, 8+12(%rsp) # 1.f
-    leaq 8(%rsp), %rcx # &vector[0]
+    movl $0, 16+0(%rsp)
+    movl $0x3f800000, 16+4(%rsp) # 1.f
+    movl $0, 16+8(%rsp)
+    movl $0x3f800000, 16+12(%rsp) # 1.f
+    leaq 16(%rsp), %rcx # &vector[0]
     callxt glProgramUniform4fv
 
     //
@@ -877,6 +888,8 @@ renderLine: # receives const Line*
     endbr64
     subq $8, %rsp # stack alignment
     movq %rdi, (%rsp) # Line* line
+
+    //
 
     movq (%rsp), %rax # Line*
     movl 5(%rax), %edi # line->program
@@ -897,6 +910,8 @@ renderLine: # receives const Line*
     xorl %edi, %edi
     callxt glUseProgram
 
+    //
+
     addq $8, %rsp
     ret
 
@@ -907,6 +922,8 @@ removeLine: # receives Line* line
     subq $8, %rsp # stack alignment
     movq %rdi, (%rsp) # Line*
 
+    //
+
     movl $1, %edi
     movq (%rsp), %rax # Line*
     leaq 1(%rax), %rsi # &line->vao
@@ -915,6 +932,8 @@ removeLine: # receives Line* line
     movq (%rsp), %rax # Line*
     movl 5(%rax), %edi # line->program
     callxt glDeleteProgram
+
+    //
 
     addq $8, %rsp
     ret
@@ -932,7 +951,7 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 
     movb 0(%rdi), %al # object->type
 
-    cmpb $0, %al # TYPE_TEXQUAD
+    cmpb $0, %al # TYPE_TEXQUAD # testb?
     je .LprocessObject.texquad
     cmpb $1, %al # TYPE_LINE
     je .LprocessObject.line
@@ -1025,6 +1044,8 @@ render:
     movl $0x8ca9, %edi # GL_DRAW_FRAMEBUFFER
     xorl %esi, %esi
     callxt glBindFramebuffer
+
+    // TODO: check every parameter in every call to gl functions (longword instead of quadword mistakes) <-----------------------------
 
     subq $56, %rsp # 6 arguments + alignment
     movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
@@ -1147,7 +1168,7 @@ createFbos:
     callxt glCheckNamedFramebufferStatus
     testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
     xorl %eax, %eax
-    setnz %al
+    sete %al
     call assert # // result == constant
 
     // postprocessing
@@ -1200,7 +1221,7 @@ createFbos:
     callxt glCheckNamedFramebufferStatus
     testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
     xorl %eax, %eax
-    setnz %al
+    sete %al
     call assert # // result == constant
 
     //
@@ -1255,10 +1276,10 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     ret
 
 .align 16
-.type createObjects, @function
+.type createObjects, @function # ------------------> TODO: for buffers: aligned allocation and 8(%rsp) - would yield unaligned addr for buffer start -> change to 0(%rsp) (move padding to the other end)
 createObjects:
     endbr64
-    CREATE_OBJECTS_STACK = 72 # // 8 alignment and SDL_Surface* + 4 vectors of 4 floats of 4 bytes each = 8 + 4^3; 8(%rsp) = mat4 model
+    CREATE_OBJECTS_STACK = 88 # // 8 alignment and SDL_Surface* + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 + padding; 16(%rsp) = mat4 model
     subq $CREATE_OBJECTS_STACK, %rsp
 
     //
@@ -1266,7 +1287,7 @@ createObjects:
     call createUbo
     call createFbos
 
-    leaq 8(%rsp), %rdi # &model
+    leaq 16(%rsp), %rdi # &model
     callxt glmc_mat4_identity
 
     //
@@ -1292,7 +1313,7 @@ createObjects:
 
     leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
     xorq %rsi, %rsi
-    leaq 8(%rsp), %rdx # &model
+    leaq 16(%rsp), %rdx # &model
     call createTexquad
 
     movl 33+gPostprocessingTexquad(%rip), %eax # gPostprocessingTexquad.texture
@@ -1324,10 +1345,10 @@ createObjects:
 
     movq %rax, %rdi # gObjects[0]
     movq (%rsp), %rsi # SDL_Surface*
-    leaq 8(%rsp), %rdx # &model
+    leaq 16(%rsp), %rdx # &model
     call createTexquad
 
-    leaq 8(%rsp), %rdi # &model
+    leaq 16(%rsp), %rdi # &model
     callxt glmc_mat4_identity
 
     //
@@ -1356,7 +1377,7 @@ createObjects:
 
     movq %rax, %rdi # gObjects[1]
     movq (%rsp), %rsi # SDL_Surface*
-    leaq 8(%rsp), %rdx # &model
+    leaq 16(%rsp), %rdx # &model
     call createTexquad
 
     movl $29, %edi # sizeof(Line)
@@ -1572,15 +1593,15 @@ main:
     movl $HEIGHT, %edx
     movl $2, %ecx # SDL_WINDOW_OPENGL
     callxt SDL_CreateWindow
-    call assert
     movq %rax, (%rsp) # window
+    call assert
 
     //
 
     movq (%rsp), %rdi
     callxt SDL_GL_CreateContext
-    call assert
     movq %rax, 8(%rsp) # glContext
+    call assert
 
     //
 
