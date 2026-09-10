@@ -28,7 +28,7 @@ OBJECTS = 3
 
 DEBUG_S = 0x0a7325 # // %s\n
 DEBUG_P = 0x0a7025 # // %p\n
-DEBUG_D = 0x0a6425 # // %p\n
+DEBUG_D = 0x0a6425 # // %d\n
 DEBUG_F = 0x0a6625 # // %f\n
 TEST_STR = 0x0a54534554 # // TEST\n
 
@@ -947,6 +947,7 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 
     //
 
+    # movq %rdi, %rdi
     movb 0(%rdi), %al # object->type
 
     cmpb $0, %al # TYPE_TEXQUAD # testb?
@@ -964,10 +965,12 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     jz .LprocessObject.texquad.delete
 
     # movq %rdi, %rdi # * object
+    movq 8(%rsp), %rdi
     call renderTexquad
     jmp .LprocessObject.end
 .LprocessObject.texquad.delete:
     # movq %rdi, %rdi # * object
+    movq 8(%rsp), %rdi
     call removeTexquad
     jmp .LprocessObject.end
 
@@ -978,10 +981,12 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     jz .LprocessObject.line.delete
 
     # movq %rdi, %rdi # * object
+    movq 8(%rsp), %rdi
     call renderLine
     jmp .LprocessObject.end
 .LprocessObject.line.delete:
     # movq %rdi, %rdi # * object
+    movq 8(%rsp), %rdi
     call removeLine
     jmp .LprocessObject.end
 
@@ -1026,10 +1031,9 @@ render:
 
     movl $0, (%rsp) # counter = 0
 .Lrender.loop:
-    movq 0+gObjects(%rip), %rdi # gObjects[0]; Object*
+    leaq gObjects(%rip), %rdi # &gObjects[0] = gObjects
     movl (%rsp), %esi # counter
-    imull $8, %esi
-    addq %rsi, %rdi # object* + counter * 8 -> gObject[counter]
+    movq (%rdi, %rsi, 8), %rdi # gObjects[counter]
     movl $1, %esi # true
     call processObject
 
@@ -1394,6 +1398,24 @@ createObjects:
 
     movq %rax, %rdi
     call createLine
+
+    // debug:
+
+    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
+    movl 1(%rax), %eax # object->vao
+    xprint DEBUG_D rax 0
+    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
+    movl 5(%rax), %eax # object->program
+    xprint DEBUG_D rax 0
+    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
+    movl 25(%rax), %eax # texquad->vbo
+    xprint DEBUG_D rax 0
+    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
+    movl 29(%rax), %eax # texquad->ebo
+    xprint DEBUG_D rax 0
+    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
+    movl 33(%rax), %eax # texquad->texture
+    xprint DEBUG_D rax 0
 
     //
 
