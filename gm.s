@@ -250,8 +250,6 @@ captureCanvas:
     addq $CAPTURE_CANVAS_STACK, %rsp
     ret
 
-// -------------------------------------------> TODO: align all stack buffers
-
 .align 16
 .type bootstrapQuad, @function
 bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float[] vertices
@@ -757,16 +755,16 @@ renderTexquad: # receives Texquad*
     //
 
     #movq %rdi, %rdi
-    leaq 5(%rdi), %rdi # Texquad* + 5 = &texquad->program
+    movl 5(%rdi), %edi # *(Texquad* + 5) = texquad->program
     callxt glUseProgram
 
     movl $0x0de1, %edi # GL_TEXTURE_2D
     movq (%rsp), %rsi # Texquad*
-    leaq 33(%rsi), %rsi # Texquad* + 33 = &texquad->texture
+    movl 33(%rsi), %esi # *(Texquad* + 33) = texquad->texture
     callxt glBindTexture
 
     movq (%rsp), %rax # Texquad*
-    leaq 1(%rax), %rdi # &texquad->vao
+    movl 1(%rax), %edi # texquad->vao
     callxt glBindVertexArray
 
     //
@@ -1047,21 +1045,21 @@ render:
 
     // TODO: check every parameter in every call to gl functions (longword instead of quadword mistakes) <-----------------------------
 
-    subq $56, %rsp # 6 arguments + alignment
+    subq $48, %rsp # 6 arguments
     movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl 0+gPostprocessingFbo(%rip), %esi # gPostprocessingFbo.id
     xorl %edx, %edx
     xorl %ecx, %ecx
     movl $WIDTH, %r8d
     movl $HEIGHT, %r9d
-    movl $0, 40(%rsp) # args are put in reverse order after 6th one
-    movl $0, 32(%rsp)
-    movl $WIDTH, 24(%rsp)
-    movl $HEIGHT, 16(%rsp)
-    movl $0x4000, 8(%rsp) # GL_COLOR_BUFFER_BIT
-    movl $0x2600, 0(%rsp) # GL_NEAREST
+    movl $0, 0(%rsp) # args are put in reverse order after 6th one
+    movl $0, 8(%rsp)
+    movl $WIDTH, 16(%rsp)
+    movl $HEIGHT, 24(%rsp)
+    movl $0x4000, 32(%rsp) # GL_COLOR_BUFFER_BIT
+    movl $0x2600, 40(%rsp) # GL_NEAREST
     callxt glBlitNamedFramebuffer
-    addq $56, %rsp # free stack memmory
+    addq $48, %rsp # free stack memmory
 
     leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
     call renderTexquad
