@@ -661,6 +661,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     extractps $1, %xmm0, 32+4(%rsp) # vector[1] = y + hHalf
     extractps $0, %xmm1, 32+8(%rsp) # vector[2] = wHalf
     extractps $2, %xmm1, 32+12(%rsp) # vector[3] = hHalf
+    int3
 .LcreateTexquad.skipTempVector:
     # 32() vec4(4 floats) temp, zero it out
     movq $0, 32(%rsp)
@@ -1336,9 +1337,9 @@ createObjects:
     movb $0, 0(%rax) # TYPE_TEXQUAD, gObjects[0]->type
     # movl $0, 1(%rax) # gObjects[0]->vao
     # movl $0, 5(%rax) # gObjects[0]->program
-    movl $310, 9(%rax) # gObjects[0]->x
-    movl $310, 13(%rax) # gObjects[0]->y
-    movl $320, 17(%rax) # gObjects[0]->w
+    movl $0x43520000, 9(%rax) # gObjects[0]->x # 210
+    movl $0x439b0000, 13(%rax) # gObjects[0]->y # 310
+    movl $420, 17(%rax) # gObjects[0]->w
     movl $320, 21(%rax) # gObjects[0]->h
     # movl $0, 25(%rax) # gObjects[0]->vbo
     # movl $0, 29(%rax) # gObjects[0]->ebo
@@ -1368,8 +1369,8 @@ createObjects:
     movb $0, 0(%rax) # TYPE_TEXQUAD, gObjects[1]->type
     # movl $0, 1(%rax) # gObjects[1]->vao
     # movl $0, 5(%rax) # gObjects[1]->program
-    movl $50, 9(%rax) # gObjects[1]->x
-    movl $50, 13(%rax) # gObjects[1]->y
+    movl $0x42480000, 9(%rax) # gObjects[1]->x # 50
+    movl $0x42480000, 13(%rax) # gObjects[1]->y # 50
     movl $320, 17(%rax) # gObjects[1]->w
     movl $320, 21(%rax) # gObjects[1]->h
     # movl $0, 25(%rax) # gObjects[1]->vbo
@@ -1390,11 +1391,11 @@ createObjects:
     movb $1, 0(%rax) # TYPE_LINE, gObjects[2]->type
     # movl $0, 1(%rax) # gObjects[2]->vao
     # movl $0, 5(%rax) # gObjects[2]->program
-    movl $500, 9(%rax) # gObjects[2]->x0
-    movl $100, 13(%rax) # gObjects[2]->y0
-    movl $600, 17(%rax) # gObjects[2]->x1
-    movl $100, 21(%rax) # gObjects[2]->y1
-    movl $10, 25(%rax) # gObjects[2]->width
+    movl $0x43fa0000, 9(%rax) # gObjects[2]->x0 # 500
+    movl $0x42c80000, 13(%rax) # gObjects[2]->y0 # 100
+    movl $0x44160000, 17(%rax) # gObjects[2]->x1 # 600
+    movl $0x42c80000, 21(%rax) # gObjects[2]->y1 # 100
+    movl $0x41200000, 25(%rax) # gObjects[2]->width # 10
 
     movq %rax, %rdi
     call createLine
