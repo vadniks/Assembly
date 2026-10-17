@@ -1408,23 +1408,27 @@ removeObjects:
 
     addq $8, %rsp # stack alignment
     ret
-# xxx
+
 function loop
-loop:
+loop: # receives SDL_Window*
     endbr64
 
     # 8 - window, 128 - event, 8 - ticks, 4 postprocessingEnabled, 4 padding for stack alignment
     LOOP_STACK = 152
     subq $LOOP_STACK, %rsp
-    # (%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event, 144(%rsp) = postprocessingEnabled? 4 bytes
-    movq %rdi, (%rsp)
-    movl $0, 144(%rsp)
+    # 0(%rsp) = window, 8(%rsp) = ticks, 16(%rsp) = event, 144(%rsp) = postprocessingEnabled? 4 bytes
+    movq %rdi, (%rsp) # * window
+    movl $0, 144(%rsp) # postprocessingEnabled
+
+    //
 
     call createObjects
 
 .Lloop.infiniteLoop:
     callxt SDL_GetTicks
-    movq %rax, 8(%rsp)
+    movq %rax, 8(%rsp) # ticks
+
+    //
 
     # movl $0x3f80000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
     movl $1, %eax
@@ -1439,12 +1443,16 @@ loop:
 
     call render
 
-    movq (%rsp), %rdi
+    //
+
+    movq (%rsp), %rdi # * window
     callxt SDL_GL_SwapWindow
     call assert
 
+    //
+
 .Lloop.eventsLoop:
-    leaq 16(%rsp), %rdi
+    leaq 16(%rsp), %rdi # event
     callxt SDL_PollEvent
     testl %eax, %eax
     jz .Lloop.eventsLoopEnd
@@ -1454,27 +1462,27 @@ loop:
 
     cmpl $0x300, 16(%rsp) # event.type SDL_EVENT_KEY_DOWN
     jne .Lloop.eventsLoop
-   
+
     cmpl $0x71, 16+28(%rsp) # event.key.key SDLK_Q
     je .Lloop.infiniteLoopEnd
-   
+
     cmpl $0x60, 16+28(%rsp) # event.key.key SDLK_GRAVE
-    jne .Lloop.eventsLoopIgnoreKey
-    notl 144(%rsp)
+    jne .Lloop.eventsLoop
+
+    notl 144(%rsp) # postprocessingEnabled
     movl 144(%rsp), %edi
     call togglePostprocessing
-.Lloop.eventsLoopIgnoreKey:
 
     jmp .Lloop.eventsLoop
 
 .Lloop.eventsLoopEnd:
     callxt SDL_GetTicks # // rax = elapsed
-    subq 8(%rsp), %rax
-    cmpq $UPDATE_PERIOD, %rax
-    ja .Lloop.infiniteLoop
+    subq 8(%rsp), %rax # ticks, elapsed # rax=elapsed = returned - ticks
+    cmpq $UPDATE_PERIOD, %rax # elapsed - update
+    jae .Lloop.infiniteLoop # // if elapsed >= update then ignore = if elapsed < update then delay
 
     movl $UPDATE_PERIOD, %edi
-    subl %eax, %edi
+    subl %eax, %edi # edi = update - elapsed
     callxt SDL_Delay
     jmp .Lloop.infiniteLoop
 
@@ -1485,7 +1493,7 @@ loop:
 
     addq $LOOP_STACK, %rsp
     ret
-
+# xxx
 function debugCallback
 debugCallback:
     endbr64
