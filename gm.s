@@ -18,6 +18,8 @@
 
 // --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
 
+# TODO: optimize for cmovcc (conditional move), etc
+
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
 
@@ -32,139 +34,135 @@ DEBUG_D = 0x0a6425 # // %d\n
 DEBUG_F = 0x0a6625 # // %f\n
 TEST_STR = 0x0a54534554 # // TEST\n
 
-.align 16
-.local SDL_HINT_VIDEO_DRIVER
-.type SDL_HINT_VIDEO_DRIVER, @object
+.macro constant n # // name
+    .align 16
+    .local \n
+    .type \n, @object
+.endm
+
+constant SDL_HINT_VIDEO_DRIVER
 SDL_HINT_VIDEO_DRIVER: .asciz "SDL_VIDEO_DRIVER"
 
-.align 16
-.local VIDEO_DRIVERS
-.type VIDEO_DRIVERS, @object
+constant VIDEO_DRIVERS
 VIDEO_DRIVERS: .asciz "wayland,x11"
 
-.align 16
-.local EMPTY_STR
-.type EMPTY_STR, @object
+constant EMPTY_STR
 EMPTY_STR: .zero 1
 
-.align 16
-.local FONT
-.type FONT, @object
+constant FONT
 FONT: .asciz "font.ttf"
 
-.align 16
-.local OUTPUT_IMAGE
-.type OUTPUT_IMAGE, @object
+constant OUTPUT_IMAGE
 OUTPUT_IMAGE: .asciz "gmout2.png"
 
-.align 16
-.local BOOTSTRAP_QUAD_INDICES
-.type BOOTSTRAP_QUAD_INDICES, @object
+constant BOOTSTRAP_QUAD_INDICES
 BOOTSTRAP_QUAD_INDICES: .float 0.0, 1.0, 3.0, 1.0, 2.0, 3.0
 BOOTSTRAP_QUAD_INDICES_SIZE = (. - BOOTSTRAP_QUAD_INDICES)
 
-.align 16
-.local UNIFORM_CLIP
-.type UNIFORM_CLIP, @object
+constant UNIFORM_CLIP
 UNIFORM_CLIP: .asciz "uClip"
 
-.align 16
-.local UNIFORM_MODEL
-.type UNIFORM_MODEL, @object
+constant UNIFORM_MODEL
 UNIFORM_MODEL: .asciz "uModel"
 
-.align 16
-.local ENTRY_POINT
-.type ENTRY_POINT, @object
-ENTRY_POINT: .asciz "main"
+constant ENTRY_POINT
+ENTRY_POINT: .asciz "main" # TODO: remove
 
-.align 16
-.local TEST_STR
-.type TEST_STR, @object
+constant TEST_STR
 TEST_STR: .asciz "TEST"
 
-.align 16
-.local IMAGE_NAME
-.type IMAGE_NAME, @object
+constant IMAGE_NAME
 IMAGE_NAME: .asciz "img.png"
 
-.align 16
-.local TEXQUAD_VERTEX
-.type TEXQUAD_VERTEX, @object
+constant TEXQUAD_VERTEX
 TEXQUAD_VERTEX: .incbin "texquad.vert.spv"
 TEXQUAD_VERTEX_SIZE = (. - TEXQUAD_VERTEX)
 
-.align 16
-.local TEXQUAD_FRAGMENT
-.type TEXQUAD_FRAGMENT, @object
+constant TEXQUAD_FRAGMENT
 TEXQUAD_FRAGMENT: .incbin "texquad.frag.spv"
 TEXQUAD_FRAGMENT_SIZE = (. - TEXQUAD_FRAGMENT)
 
-.align 16
-.local LINE_VERTEX
-.type LINE_VERTEX, @object
+constant LINE_VERTEX
 LINE_VERTEX: .incbin "line.vert.spv"
 LINE_VERTEX_SIZE = (. - LINE_VERTEX)
 
-.align 16
-.local LINE_FRAGMENT
-.type LINE_FRAGMENT, @object
+constant LINE_FRAGMENT
 LINE_FRAGMENT: .incbin "line.frag.spv"
 LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
 
-.local gFont
-.type gFont, @object
-.comm gFont, 8, 16
+.macro variable n, s # // name, size
+    .local \n
+    .type \n, @object
+    .comm \n, \s, 16
+.endm
 
-.local gMaxAnisotropy
-.type gMaxAnisotropy, @object
-.comm gMaxAnisotropy, 4, 16 # float
+variable gFont 8 # // void*
+variable gMaxAnisotropy 4 # // float
 
-# pragma pack for structs = no paddings # <---------------- TODO: actually align fields in structures
+# structs are also 16-bytes aligned
 
-# typedef enum : byte {TYPE_TEXQUAD, TYPE_LINE} Type; // size = 1
+# typedef enum : int {TYPE_TEXQUAD, TYPE_LINE} Type; // size = 4
 
 # typedef struct {
 #     Type type;
 #     GLuint vao, program;
-# } Object; // size = 1 + 2 * 4 = 9
-.local gObjects
-.type gObjects, @object
-.comm gObjects, 24, 16 # <Object*>; 8 * 3
+#     <int padding>;
+# } Object; // size = 4 * 3 + 4 padding = 16
+variable gObjects 48 # // <Object*>; 16 * 3
+
+OBJECT_SIZE = 16
+OBJECT_TYPE_OFFSET = 0
+OBJECT_VAO_OFFSET = 4
+OBJECT_PROGRAM_OFFSET = 8
 
 # typedef struct {
 #     Object; // ms-anon-structure-tag = copies the whole structure
 #     GLfloat x, y;
 #     GLuint w, h, vbo, ebo, texture;
 #     bool clip;
-# } Texquad; // size = 9 + 2 * 4 + 5 * 4 + 1 = 38
+# } Texquad; // size = 16 + 8 * 4 = 48
+
+TEXQUAD_SIZE = 48
+TEXQUAD_X_OFFSET = 16
+TEXQUAD_Y_OFFSET = 20
+TEXQUAD_W_OFFSET = 24
+TEXQUAD_H_OFFSET = 28
+TEXQUAD_VBO_OFFSET = 32
+TEXQUAD_EBO_OFFSET = 36
+TEXQUAD_TEXTURE_OFFSET = 40
+TEXQUAD_CLIP_OFFSET = 44
 
 # typedef struct {
 #     Object; // ms-anon-structure-tag = copies the whole structure
 #     GLfloat x0, y0, x1, y1, width;
-# } Line; // size = 9 + 5 * 4 = 29
+#     <long padding>;
+#     <int padding>;
+# } Line; // size = 16 + 5 * 4 + 12 padding = 48
 
-.local gUbo
-.type gUbo, @object
-.comm gUbo, 4, 16 # uint
+LINE_SIZE = 48
+LINE_X0_OFFSET = 16
+LINE_Y0_OFFSET = 20
+LINE_X1_OFFSET = 24
+LINE_Y1_OFFSET = 28
+LINE_WIDTH_OFFSET = 32
+
+variable gUbo 4 # // uint
 
 # typedef struct {
 #     GLuint id, texture;
-# } Fbo; // size = 4 + 4 = 8
-.local gMsaaFbo
-.type gMsaaFbo, @object
-.comm gMsaaFbo, 8, 16
+#     <long padding>;
+# } Fbo; // size = 2 * 4 + 8 padding = 16
 
-.local gPostprocessingFbo
-.type gPostprocessingFbo, @object
-.comm gPostprocessingFbo, 8, 16
+FBO_SIZE = 16
+FBO_ID_OFFSET = 0
+FBO_TEXTURE_OFFSET = 4
 
-.local gPostprocessingTexquad
-.type gPostprocessingTexquad, @object
-.comm gPostprocessingTexquad, 38, 16
+variable gMsaaFbo FBO_SIZE # // Fbo
+variable gPostprocessingFbo FBO_SIZE # // Fbo
+variable gPostprocessingTexquad TEXQUAD_SIZE # // Texquad
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -192,8 +190,15 @@ LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
     popq %rax
 .endm
 
-.align 16
-.type assert, @function
+.macro function n # // name
+    .align 16
+    .type n, @function
+.endm
+
+// every function's start address is 16-bytes aligned
+// malloc/calloc/realloc returns 16-bytes aligned addresses
+
+function assert
 assert: # first parameter int is in the eax for optimization's sake
     endbr64
     testl %eax, %eax
@@ -203,8 +208,7 @@ assert: # first parameter int is in the eax for optimization's sake
 .Lassert.ret:
     ret
 
-.align 16
-.type captureCanvas, @function
+function captureCanvas
 captureCanvas:
     endbr64
 
@@ -241,7 +245,7 @@ captureCanvas:
 
     movq (%rsp), %rdi # SDL_Surface* surface
     leaq OUTPUT_IMAGE(%rip), %rsi
-    callxt IMG_SavePNG 
+    callxt IMG_SavePNG
     call assert
 
     movq (%rsp), %rdi # SDL_Surface* surface
@@ -250,8 +254,7 @@ captureCanvas:
     addq $CAPTURE_CANVAS_STACK, %rsp
     ret
 
-.align 16
-.type bootstrapQuad, @function
+function bootstrapQuad
 bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float[] vertices
     endbr64
 
@@ -267,48 +270,48 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     //
     
     movl $1, %edi
-    movq (%rsp), %rsi
+    movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
-    movq (%rsp), %rax
-    movl (%rax), %eax
+    movq (%rsp), %rax # uint* vao
+    movl (%rax), %eax # vao
     call assert
 
     //
 
     movl $1, %edi
-    movq 8(%rsp), %rsi
+    movq 8(%rsp), %rsi # uint* vbo
     callxt glCreateBuffers
-    movq 8(%rsp), %rax
-    movl (%rax), %eax
+    movq 8(%rsp), %rax # uint* vbo
+    movl (%rax), %eax # vbo
     call assert
 
-    movq 8(%rsp), %rdi
-    movl (%rdi), %edi
-    movl 24(%rsp), %esi
-    movq 28(%rsp), %rdx
+    movq 8(%rsp), %rdi # uint* vbo
+    movl (%rdi), %edi # vbo
+    movl 24(%rsp), %esi # uint verticesSize
+    movq 28(%rsp), %rdx # void* vertices
     xorl %ecx, %ecx
     callxt glNamedBufferStorage
 
     //
 
     movl $1, %edi
-    movq 16(%rsp), %rsi
+    movq 16(%rsp), %rsi # uint* ebo
     callxt glCreateBuffers
-    movq 16(%rsp), %rax
-    movl (%rax), %eax
+    movq 16(%rsp), %rax # uint* ebo
+    movl (%rax), %eax # ebo
     call assert
 
-    movq 16(%rsp), %rdi
-    movl (%rdi), %edi
+    movq 16(%rsp), %rdi # uint* ebo
+    movl (%rdi), %edi # ebo
     movl $BOOTSTRAP_QUAD_INDICES_SIZE, %esi
     leaq BOOTSTRAP_QUAD_INDICES(%rip), %rdx
     xorl %ecx, %ecx
     callxt glNamedBufferStorage
 
-    movq (%rsp), %rdi
-    movl (%rdi), %edi
-    movq 16(%rsp), %rsi
-    movl (%rsi), %esi
+    movq (%rsp), %rdi # uint* vao
+    movl (%rdi), %edi # vao
+    movq 16(%rsp), %rsi # uint* ebo
+    movl (%rsi), %esi # ebo
     callxt glVertexArrayElementBuffer
 
     //
@@ -316,8 +319,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
-.align 16
-.type makeShaders, @function
+function makeShaders
 makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentSize, char* fragment
     endbr64
 
@@ -338,106 +340,106 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
 
     movl $0x8b31, %edi # GL_VERTEX_SHADER
     callxt glCreateShader
-    movl %eax, 24(%rsp)
+    movl %eax, 24(%rsp) # vertexShader
     call assert
 
     movl $1, %edi
-    leaq 24(%rsp), %rsi
+    leaq 24(%rsp), %rsi # &vertexShader
     movl $0x9551, %edx # GL_SHADER_BINARY_FORMAT_SPIR_V
-    movq 4(%rsp), %rcx
-    movl (%rsp), %r8d
+    movq 4(%rsp), %rcx # vertex
+    movl (%rsp), %r8d # vertexSize
     callxt glShaderBinary
 
-    movl 24(%rsp), %edi
+    movl 24(%rsp), %edi # vertexShader
     leaq ENTRY_POINT(%rip), %rsi
     xorl %edx, %edx
     xorq %rcx, %rcx
     xorq %r8, %r8
     callxt glSpecializeShader
 
-    movl 24(%rsp), %edi
+    movl 24(%rsp), %edi # vertexShader
     movl $0x8b81, %esi # GL_COMPILE_STATUS
-    leaq 36(%rsp), %rdx # 36 - not aligned... can be problematic... - nope;)
+    leaq 36(%rsp), %rdx # &success
     callxt glGetShaderiv
-    movl 36(%rsp), %eax
+    movl 36(%rsp), %eax # success
     call assert
 
     //
 
     movl $0x8b30, %edi # GL_FRAGMENT_SHADER
     callxt glCreateShader
-    movl %eax, 28(%rsp)
+    movl %eax, 28(%rsp) # fragmentShader
     call assert
 
     movl $1, %edi
-    leaq 28(%rsp), %rsi
+    leaq 28(%rsp), %rsi # &fragmentShader
     movl $0x9551, %edx # GL_SHADER_BINARY_FORMAT_SPIR_V
-    movq 16(%rsp), %rcx
-    movl 12(%rsp), %r8d
+    movq 16(%rsp), %rcx # fragment
+    movl 12(%rsp), %r8d # fragmentSize
     callxt glShaderBinary
 
-    movl 28(%rsp), %edi
+    movl 28(%rsp), %edi # fragmentShader
     leaq ENTRY_POINT(%rip), %rsi
     xorl %edx, %edx
     xorq %rcx, %rcx
     xorq %r8, %r8
     callxt glSpecializeShader
 
-    movl 28(%rsp), %edi
+    movl 28(%rsp), %edi # fragmentShader
     movl $0x8b81, %esi # GL_COMPILE_STATUS
-    leaq 36(%rsp), %rdx
-    callxt glGetShaderiv # // <<< sigsegv
-    movl 36(%rsp), %eax
+    leaq 36(%rsp), %rdx # &success
+    callxt glGetShaderiv
+    movl 36(%rsp), %eax # success
     call assert
 
     //
 
     callxt glCreateProgram
-    movl %eax, 32(%rsp)
+    movl %eax, 32(%rsp) # program
     call assert
 
-    movl 32(%rsp), %edi
-    movl 24(%rsp), %esi
+    movl 32(%rsp), %edi # program
+    movl 24(%rsp), %esi # vertexShader
     callxt glAttachShader
 
-    movl 32(%rsp), %edi
-    movl 28(%rsp), %esi
+    movl 32(%rsp), %edi # program
+    movl 28(%rsp), %esi # fragmentShader
     callxt glAttachShader
 
-    movl 32(%rsp), %edi
+    movl 32(%rsp), %edi # program
     callxt glLinkProgram
 
-    movl 32(%rsp), %edi
+    movl 32(%rsp), %edi # program
     movl $0x8b82, %esi # GL_LINK_STATUS
-    leaq 36(%rsp), %rdx
+    leaq 36(%rsp), %rdx # &success
     callxt glGetProgramiv
-    movl 36(%rsp), %eax
+    movl 36(%rsp), %eax # success
     call assert
 
     //
 
-    movl 32(%rsp), %edi
+    movl 32(%rsp), %edi # program
     callxt glValidateProgram
 
-    movl 32(%rsp), %edi
+    movl 32(%rsp), %edi # program
     movl $0x8b83, %esi # GL_VALIDATE_STATUS
-    leaq 36(%rsp), %rdx
+    leaq 36(%rsp), %rdx # &success
     callxt glGetProgramiv
-    movl 36(%rsp), %eax
+    movl 36(%rsp), %eax # success
     call assert
 
     //
 
-    movl 32(%rsp), %edi
-    movl 28(%rsp), %esi
+    movl 32(%rsp), %edi # program
+    movl 28(%rsp), %esi # fragmentShader
     callxt glDetachShader
-    movl 28(%rsp), %edi
+    movl 28(%rsp), %edi # fragmentShader
     callxt glDeleteShader
 
-    movl 32(%rsp), %edi
-    movl 24(%rsp), %esi
+    movl 32(%rsp), %edi # program
+    movl 24(%rsp), %esi # vertexShader
     callxt glDetachShader
-    movl 24(%rsp), %edi
+    movl 24(%rsp), %edi # vertexShader
     callxt glDeleteShader
 
     //
@@ -446,11 +448,10 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     addq $MAKE_SHADERS_STACK, %rsp
     ret
 
-.align 16 # TODO: all buffers need to be aligned on a 16 bytes boundary, heap allocator does this internally and for stack based buffers we need to do this ourselves
-.type createTexquad, @function
+function createTexquad
 createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - pointer
     endbr64
-    CREATE_TEXQUAD_STACK = 104 # // 0 alignment + 3 * 8 pointers + vec(4 * 4 floats * 4 bytes each) + 16 padding
+    CREATE_TEXQUAD_STACK = 104 # // 0 alignment + 3 * 8 pointers + vec(4 * 4 floats * 4 bytes each)=64 + 16 padding
     subq $CREATE_TEXQUAD_STACK, %rsp
     movq %rdi, (%rsp) # Texquad*
     movq %rsi, 8(%rsp) # SDL_Surface*
@@ -466,44 +467,44 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     movl $0x0de1, %edi # GL_TEXTURE_2D
     movl $1, %esi
     movq (%rsp), %rdx # Texquad*
-    leaq 33(%rdx), %rdx # &texquad->texture
+    leaq TEXQUAD_TEXTURE_OFFSET(%rdx), %rdx # &texquad->texture
     callxt glCreateTextures
     movq (%rsp), %rax # Texquad*
-    movl 33(%rax), %eax # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rax), %eax # texquad->texture
     call assert
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     movl $0x2802, %esi # GL_TEXTURE_WRAP_S
     movl $0x812f, %edx # GL_CLAMP_TO_EDGE
     callxt glTextureParameteri
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     movl $0x2803, %esi # GL_TEXTURE_WRAP_T
     movl $0x812f, %edx # GL_CLAMP_TO_EDGE
     callxt glTextureParameteri
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
     movl $0x2703, %edx # GL_LINEAR_MIPMAP_LINEAR
     callxt glTextureParameteri
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
     movl $0x2601, %edx # GL_LINEAR
     callxt glTextureParameteri
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
     movss gMaxAnisotropy(%rip), %xmm0
     callxt glTextureParameterf
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     movl $1, %esi
     movl $0x8058, %edx # GL_RGBA8
     movq 8(%rsp), %rax # SDL_Surface*
@@ -512,7 +513,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     callxt glTextureStorage2D
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     xorl %esi, %esi
     xorl %edx, %edx
     xorl %ecx, %ecx
@@ -527,7 +528,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     addq $32, %rsp # free stack memory
 
     movq (%rsp), %rdi # Texquad*
-    movl 33(%rdi), %edi # texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
     callxt glGenerateTextureMipmap
 
     movq 8(%rsp), %rdi # SDL_Surface*
@@ -542,57 +543,62 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     # edi = 1.f
     # esi = texquad->y
     # edx = texquad->x
+    # ecx = x + w
+    # r8d = y + h
 
     # xmm0: width, 1, height, - (ints)
     # then: width, 1, height, - (floats)
     movq (%rsp), %rax # Texquad*
-    pinsrd $0, 17(%rax), %xmm0 # texquad->w
+    insertps $0, TEXQUAD_W_OFFSET(%rax), %xmm0 # texquad->w
     movl $1, %edi
     pinsrd $1, %edi, %xmm0 # 1
-    pinsrd $2, 21(%rax), %xmm0 # texquad->h
+    insertps $2, TEXQUAD_H_OFFSET(%rax), %xmm0 # texquad->h
     cvtdq2ps %xmm0, %xmm0
     extractps $1, %xmm0, %edi # 1.f
     # xmm0: width, x, height, y (floats)
     # then: width + x, height + y, -, - (floats)
-    pinsrd $1, 9(%rax), %xmm0 # texquad->x
-    pinsrd $3, 13(%rax), %xmm0 # texquad->y
+    insertps $1, TEXQUAD_X_OFFSET(%rax), %xmm0 # texquad->x
+    insertps $3, TEXQUAD_Y_OFFSET(%rax), %xmm0 # texquad->y
     haddps %xmm0, %xmm0 # xmm0[0] = xmm0[0] + xmm0[1], xmm0[1] = xmm0[2] + xmm0[3]
 
-    extractps $0, %xmm0, 32+0(%rsp) # vector[0] = x + w
-    extractps $1, %xmm0, 32+4(%rsp) # vector[1] = y + h
+    # vertices = vector
+    extractps $0, %xmm0, %ecx # x + w
+    movl %ecx, 32+0(%rsp) # vector[0] = x + w
+    extractps $1, %xmm0, %r8d # y + h
+    movl %r8d, 32+4(%rsp) # vector[1] = y + h
     movl %edi, 32+8(%rsp) # vector[2] = 1.f
     movl %edi, 32+12(%rsp) # vector[3] = 1.f
     #
-    extractps $0, %xmm0, 32+16(%rsp) # vector[4] = x + w
-    movl 13(%rax), %esi # texquad->y
+    movl %ecx, 32+16(%rsp) # vector[4] = x + w
+    movl TEXQUAD_Y_OFFSET(%rax), %esi # texquad->y
     movl %esi, 32+20(%rsp) # vector[5] = texquad->y
     movl %edi, 32+24(%rsp) # vector[6] = 1.f
     movl $0, 32+28(%rsp) # vector[7] = 0.f
     #
-    movl 9(%rax), %edx # texquad->x
+    movl TEXQUAD_X_OFFSET(%rax), %edx # texquad->x
     movl %edx, 32+32(%rsp) # vector[8] = texquad->x
     movl %esi, 32+36(%rsp) # vector[9] = texquad->y
     movl $0, 32+40(%rsp) # vector[10] = 0.f
     movl $0, 32+44(%rsp) # vector[11] = 0.f
     #
     movl %edx, 32+48(%rsp) # vector[12] = texquad->x
-    extractps $1, %xmm0, 32+52(%rsp) # vector[13] = y + h
+    movl %r8d, 32+52(%rsp) # vector[13] = y + h
     movl $0, 32+56(%rsp) # vector[14] = 0.f
     movl %edi, 32+60(%rsp) # vector[15] = 1.f
 
     //
 
-    leaq 1(%rax), %rdi # &texquad->vao
-    leaq 25(%rax), %rsi # &texquad->vbo
-    leaq 29(%rax), %rdx # &texquad->ebo
+    leaq OBJECT_VAO_OFFSET(%rax), %rdi # &texquad->vao
+    leaq TEXQUAD_VBO_OFFSET(%rax), %rsi # &texquad->vbo
+    leaq TEXQUAD_EBO_OFFSET(%rax), %rdx # &texquad->ebo
     movl $64, %ecx # sizeof(vertices)
     leaq 32(%rsp), %r8 # &vector
     call bootstrapQuad
 
     movq (%rsp), %rax # Texquad*
-    movl 1(%rax), %edi # texquad->vao
+    movl OBJECT_VAO_OFFSET(%rax), %edi # texquad->vao
     xorl %esi, %esi
-    movl 25(%rax), %edx # texquad->vbo
+    movl TEXQUAD_VBO_OFFSET(%rax), %edx # texquad->vbo
     xorl %ecx, %ecx
     movl $16, %r8d # 4 * sizeof(float)
     callxt glVertexArrayVertexBuffer
@@ -600,7 +606,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     //
 
     movq (%rsp), %rax # Texquad*
-    movl 1(%rax), %edi # texquad->vao
+    movl OBJECT_VAO_OFFSET(%rax), %edi # texquad->vao
     xorl %esi, %esi
     movl $4, %edx
     movl $0x1406, %ecx # GL_FLOAT
@@ -609,13 +615,13 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     callxt glVertexArrayAttribFormat
 
     movq (%rsp), %rax # Texquad*
-    movl 1(%rax), %edi # texquad->vao
+    movl OBJECT_VAO_OFFSET(%rax), %edi # texquad->vao
     xorl %esi, %esi
     xorl %edx, %edx
     callxt glVertexArrayAttribBinding
 
     movq (%rsp), %rax # Texquad*
-    movl 1(%rax), %edi # texquad->vao
+    movl OBJECT_VAO_OFFSET(%rax), %edi # texquad->vao
     xorl %esi, %esi
     callxt glEnableVertexArrayAttrib
 
@@ -627,19 +633,19 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     leaq TEXQUAD_FRAGMENT(%rip), %rcx
     call makeShaders
     movq (%rsp), %rdi # Texquad*
-    movl %eax, 5(%rdi) # texquad->program = result
+    movl %eax, OBJECT_PROGRAM_OFFSET(%rdi) # texquad->program = result
 
     //
 
     movq (%rsp), %rax # Texquad*
-    movb 37(%rax), %dil # texquad->clip
-    testb %dil, %dil
+    movl TEXQUAD_CLIP_OFFSET(%rax), %edi # texquad->clip
+    testl %edi, %edi
     jz .LcreateTexquad.skipTempVector
 
     # xmm0: texquad->w, -, texquad->h, - (ints)
     # then: ... (floats)
-    pinsrd $0, 17(%rax), %xmm0 # xmm0[0] = texquad->w
-    pinsrd $2, 21(%rax), %xmm0 # xmm0[2] = texquad->h
+    insertps $0, TEXQUAD_W_OFFSET(%rax), %xmm0 # xmm0[0] = texquad->w
+    insertps $2, TEXQUAD_H_OFFSET(%rax), %xmm0 # xmm0[2] = texquad->h
     cvtdq2ps %xmm0, %xmm0
     # xmm1: 2.f, -, 2.f, - (floats)
     movl $0x40000000, %edi # 2.f
@@ -651,26 +657,25 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
 
     # xmm0: wHalf, -, hHalf, - (floats)
     # then: wHalf, x, hHalf, y (floats)
-    pinsrd $1, 9(%rax), %xmm0 # texquad->x
-    pinsrd $3, 13(%rax), %xmm0 # texquad->y
+    insertps $1, TEXQUAD_X_OFFSET(%rax), %xmm0 # texquad->x
+    insertps $3, TEXQUAD_Y_OFFSET(%rax), %xmm0 # texquad->y
     # xmm0: wHalf + x, hHalf + y, -, - (floats)
     haddps %xmm0, %xmm0
 
-    # 32() vec4(4 floats) temp # xxx
-    extractps $0, %xmm0, 32+0(%rsp) # vector[0] = x + wHalf
-    extractps $1, %xmm0, 32+4(%rsp) # vector[1] = y + hHalf
+    # 32() vec4(4 floats) temp
+    movsd %xmm0, 32+0(%rsp) # vector[0] = x + wHalf and vector[1] = y + hHalf
     extractps $0, %xmm1, 32+8(%rsp) # vector[2] = wHalf
     extractps $2, %xmm1, 32+12(%rsp) # vector[3] = hHalf
-    int3
 .LcreateTexquad.skipTempVector:
     # 32() vec4(4 floats) temp, zero it out
-    movq $0, 32(%rsp)
-    movq $0, 40(%rsp)
+    xorps %xmm0, %xmm0
+    movaps %xmm0, 32(%rsp)
 
     //
+// TODO: check the name of all the functions
 
     # movq (%rsp), %rax # Texquad*
-    movl 5(%rax), %edi # texquad->program
+    movl OBJECT_PROGRAM_OFFSET(%rax), %edi # texquad->program
     movl $3, %esi
     movl $1, %edx
     leaq 32(%rsp), %rcx # &vector
@@ -679,7 +684,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     //
 
     movq (%rsp), %rax # Texquad*
-    movl 5(%rax), %edi # texquad->program
+    movl OBJECT_PROGRAM_OFFSET(%rax), %edi # texquad->program
     xorl %esi, %esi
     movl $1, %edx
     xorl %ecx, %ecx # GL_FALSE
@@ -691,8 +696,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     addq $CREATE_TEXQUAD_STACK, %rsp
     ret
 
-.align 16
-.type createTexture, @function
+function createTexture
 createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageOrText
     endbr64
 
@@ -700,21 +704,21 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     subq $CREATE_TEXTURE_STACK, %rsp # 3 * 8 void* + 4 int + 12 padding for stack alignment
     # 0() imgPathOrText, 8() imageOrText, 12() SDL_Surface* temp, 20() SDL_Surface* converted
 
-    movq %rdi, (%rsp)
-    movl %esi, 8(%rsp)
-    movq $0, 12(%rsp)
-    movq $0, 20(%rsp)
+    movq %rdi, (%rsp) # * imgPathOrText
+    movl %esi, 8(%rsp) # bool/int imageOrText
+    movq $0, 12(%rsp) # * temp
+    movq $0, 20(%rsp) # * converted
 
     //
 
-    testl %esi, %esi # if imgOrText
+    testl %esi, %esi # if imageOrText
     jz .LcreateTexture.text
-    #movq %rdi, %rdi
+    #movq %rdi, %rdi # imgPathOrText
     callxt IMG_Load
     jmp .LcreateTexture.endCondition
 .LcreateTexture.text:
     movq gFont(%rip), %rdi
-    movq (%rsp), %rsi
+    movq (%rsp), %rsi # imgPathOrText
     xorq %rdx, %rdx
     movl $0x7f7f7fff, %ecx # (SDL_Color) {127, 127, 127, 255}
     callxt TTF_RenderText_Blended
@@ -724,30 +728,29 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
 
     //
 
-    movq %rax, %rdi # temp surface
+    movq 12(%rsp), %rdi # temp surface
     movl $0x16762004, %esi # SDL_PIXELFORMAT_RGBA32
     callxt SDL_ConvertSurface
     movq %rax, 20(%rsp) # converted surface
     call assert
 
-    movq 12(%rsp), %rdi
+    movq 12(%rsp), %rdi # temp surface
     callxt SDL_DestroySurface
 
     //
 
-    movq 20(%rsp), %rdi
+    movq 20(%rsp), %rdi # converted surface
     movl $2, %esi # SDL_FLIP_VERTICAL
     callxt SDL_FlipSurface
     call assert
 
     //
 
-    movq 20(%rsp), %rax
+    movq 20(%rsp), %rax # return converted surface
     addq $CREATE_TEXTURE_STACK, %rsp
     retq
 
-.align 16
-.type renderTexquad, @function
+function renderTexquad
 renderTexquad: # receives Texquad*
     endbr64
     subq $8, %rsp # stack alignment (cuz inside a caller it's aligned until the call instruction which substructs 8, making the stack misaligned, so we need to substract 8 more bytes to align the stack)
@@ -755,17 +758,17 @@ renderTexquad: # receives Texquad*
 
     //
 
-    #movq %rdi, %rdi
-    movl 5(%rdi), %edi # *(Texquad* + 5) = texquad->program
+    #movq %rdi, %rdi # texquad
+    movl OBJECT_PROGRAM_OFFSET(%rdi), %edi # *(Texquad* + OFF) = texquad->program
     callxt glUseProgram
 
     movl $0x0de1, %edi # GL_TEXTURE_2D
     movq (%rsp), %rsi # Texquad*
-    movl 33(%rsi), %esi # *(Texquad* + 33) = texquad->texture
+    movl TEXQUAD_TEXTURE_OFFSET(%rsi), %esi # *(Texquad* + OFF) = texquad->texture
     callxt glBindTexture
 
     movq (%rsp), %rax # Texquad*
-    movl 1(%rax), %edi # texquad->vao
+    movl OBJECT_VAO_OFFSET(%rax), %edi # texquad->vao
     callxt glBindVertexArray
 
     //
@@ -789,171 +792,166 @@ renderTexquad: # receives Texquad*
     addq $8, %rsp
     ret
 
-.align 16
-.type removeTexquad, @function
+function removeTexquad
 removeTexquad: # receives Texquad*
     endbr64
-    REMOVE_TEXQUAD_STACK = 24
+    REMOVE_TEXQUAD_STACK = 24 # // 8 Texquad* + arr(4 int + 4 int) + 8 padding
     subq $REMOVE_TEXQUAD_STACK, %rsp # stack alignment (aligned -> call -> misaligned -> *align* -> free -> return); 0() Texquad*, 8() array of ids, 16() padding
     movq %rdi, (%rsp) # Texquad*
 
     movl $1, %edi
     movq (%rsp), %rax # Texquad*
-    leaq 33(%rax), %rsi # &texquad->texture
+    leaq TEXQUAD_TEXTURE_OFFSET(%rax), %rsi # &texquad->texture
     callxt glDeleteTextures
 
     movq (%rsp), %rax # Texquad*
-    movl 5(%rax), %edi # texquad->program
+    movl OBJECT_PROGRAM_OFFSET(%rax), %edi # texquad->program
     callxt glDeleteProgram
 
     movl $2, %edi
     movq (%rsp), %rsi # Texquad*
-    movl 29(%rsi), %eax # texquad->ebo
-    movl %eax, 8+0(%rsp) # arr[0]
-    movl 25(%rsi), %eax # texquad->vbo
-    movl %eax, 8+4(%rsp) # arr[1]
+    movl TEXQUAD_EBO_OFFSET(%rsi), %eax # texquad->ebo
+    movl %eax, 8+0(%rsp) # arr[0] = ebo
+    movl TEXQUAD_VBO_OFFSET(%rsi), %eax # texquad->vbo
+    movl %eax, 8+4(%rsp) # arr[1] = vbo
     leaq 8(%rsp), %rsi # (uint[2]) {texquad->ebo, texquad->vbo}
     callxt glDeleteBuffers
 
     movl $1, %edi
     movq (%rsp), %rax # Texquad*
-    leaq 1(%rax), %rsi # &texquad->vao
+    leaq OBJECT_VAO_OFFSET(%rax), %rsi # &texquad->vao
     callxt glDeleteVertexArrays
 
     addq $REMOVE_TEXQUAD_STACK, %rsp
     ret
+# xxx
+# function createLine
+# createLine: # receives Line*
+#     endbr64
+#     CREATE_LINE_STACK = 40
+#     subq $CREATE_LINE_STACK, %rsp # stack alignment and 0() Line*, 8() padding, 16() vector(4 * floats) + padding
+#     movq %rdi, (%rsp) # Line*
+# 
+#     movl $1, %edi
+#     movq (%rsp), %rax # Line*
+#     leaq 1(%rax), %rsi # &line->vao
+#     callxt glGenVertexArrays
+#     movq (%rsp), %rax # Line*
+#     movl 1(%rax), %eax # line->vao
+#     call assert
+# 
+#     //
+# 
+#     movl $LINE_VERTEX_SIZE, %edi
+#     leaq LINE_VERTEX(%rip), %rsi
+#     movl $LINE_FRAGMENT_SIZE, %edx
+#     leaq LINE_FRAGMENT(%rip), %rcx
+#     call makeShaders
+#     movq (%rsp), %rdi # Line*
+#     movl %eax, 5(%rdi) # line->program
+# 
+#     //
+# 
+#     # movq (%rsp), %rdi # Line*
+#     movl 5(%rdi), %edi # line->program
+#     xorl %esi, %esi
+#     movl $1, %edx
+#     movq (%rsp), %rcx # Line*
+#     leaq 9(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # <---------- TODO: unligned in struct
+#     callxt glProgramUniform4fv
+# 
+#     movq (%rsp), %rax # Line*
+#     movl 5(%rax), %edi # line->program
+#     movl $1, %esi
+#     movss 25(%rax), %xmm0 # line->width
+#     callxt glProgramUniform1f
+# 
+#     movq (%rsp), %rdi # Line*
+#     movl 5(%rdi), %edi # line->program
+#     movl $2, %esi
+#     movl $1, %edx
+#     movl $0, 16+0(%rsp)
+#     movl $0x3f800000, 16+4(%rsp) # 1.f
+#     movl $0, 16+8(%rsp)
+#     movl $0x3f800000, 16+12(%rsp) # 1.f
+#     leaq 16(%rsp), %rcx # &vector[0]
+#     callxt glProgramUniform4fv
+# 
+#     //
+# 
+#     addq $CREATE_LINE_STACK, %rsp
+#     ret
+# 
+# function renderLine
+# renderLine: # receives const Line*
+#     endbr64
+#     subq $8, %rsp # stack alignment
+#     movq %rdi, (%rsp) # Line* line
+# 
+#     //
+# 
+#     movq (%rsp), %rax # Line*
+#     movl 5(%rax), %edi # line->program
+#     callxt glUseProgram
+# 
+#     movq (%rsp), %rax # Line*
+#     movl 1(%rax), %edi # line->vao
+#     callxt glBindVertexArray
+# 
+#     movl $4, %edi # GL_TRIANGLES
+#     xorl %esi, %esi
+#     movl $6, %edx
+#     callxt glDrawArrays
+# 
+#     xorl %edi, %edi
+#     callxt glBindVertexArray
+# 
+#     xorl %edi, %edi
+#     callxt glUseProgram
+# 
+#     //
+# 
+#     addq $8, %rsp
+#     ret
+# 
+# function removeLine
+# removeLine: # receives Line* line
+#     endbr64
+#     subq $8, %rsp # stack alignment
+#     movq %rdi, (%rsp) # Line*
+# 
+#     //
+# 
+#     movl $1, %edi
+#     movq (%rsp), %rax # Line*
+#     leaq 1(%rax), %rsi # &line->vao
+#     callxt glDeleteVertexArrays
+# 
+#     movq (%rsp), %rax # Line*
+#     movl 5(%rax), %edi # line->program
+#     callxt glDeleteProgram
+# 
+#     //
+# 
+#     addq $8, %rsp
+#     ret
 
-.align 16
-.type createLine, @object
-createLine: # receives Line*
-    endbr64
-    CREATE_LINE_STACK = 40
-    subq $CREATE_LINE_STACK, %rsp # stack alignment and 0() Line*, 8() padding, 16() vector(4 * floats) + padding
-    movq %rdi, (%rsp) # Line*
-
-    movl $1, %edi
-    movq (%rsp), %rax # Line*
-    leaq 1(%rax), %rsi # &line->vao
-    callxt glGenVertexArrays
-    movq (%rsp), %rax # Line*
-    movl 1(%rax), %eax # line->vao
-    call assert
-
-    //
-
-    movl $LINE_VERTEX_SIZE, %edi
-    leaq LINE_VERTEX(%rip), %rsi
-    movl $LINE_FRAGMENT_SIZE, %edx
-    leaq LINE_FRAGMENT(%rip), %rcx
-    call makeShaders
-    movq (%rsp), %rdi # Line*
-    movl %eax, 5(%rdi) # line->program
-
-    //
-
-    # movq (%rsp), %rdi # Line*
-    movl 5(%rdi), %edi # line->program
-    xorl %esi, %esi
-    movl $1, %edx
-    movq (%rsp), %rcx # Line*
-    leaq 9(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # <---------- TODO: unligned in struct
-    callxt glProgramUniform4fv
-
-    movq (%rsp), %rax # Line*
-    movl 5(%rax), %edi # line->program
-    movl $1, %esi
-    movss 25(%rax), %xmm0 # line->width
-    callxt glProgramUniform1f
-
-    movq (%rsp), %rdi # Line*
-    movl 5(%rdi), %edi # line->program
-    movl $2, %esi
-    movl $1, %edx
-    movl $0, 16+0(%rsp)
-    movl $0x3f800000, 16+4(%rsp) # 1.f
-    movl $0, 16+8(%rsp)
-    movl $0x3f800000, 16+12(%rsp) # 1.f
-    leaq 16(%rsp), %rcx # &vector[0]
-    callxt glProgramUniform4fv
-
-    //
-
-    addq $CREATE_LINE_STACK, %rsp
-    ret
-
-.align 16
-.type renderLine, @function
-renderLine: # receives const Line*
-    endbr64
-    subq $8, %rsp # stack alignment
-    movq %rdi, (%rsp) # Line* line
-
-    //
-
-    movq (%rsp), %rax # Line*
-    movl 5(%rax), %edi # line->program
-    callxt glUseProgram
-
-    movq (%rsp), %rax # Line*
-    movl 1(%rax), %edi # line->vao
-    callxt glBindVertexArray
-
-    movl $4, %edi # GL_TRIANGLES
-    xorl %esi, %esi
-    movl $6, %edx
-    callxt glDrawArrays
-
-    xorl %edi, %edi
-    callxt glBindVertexArray
-
-    xorl %edi, %edi
-    callxt glUseProgram
-
-    //
-
-    addq $8, %rsp
-    ret
-
-.align 16
-.type removeLine, @function
-removeLine: # receives Line* line
-    endbr64
-    subq $8, %rsp # stack alignment
-    movq %rdi, (%rsp) # Line*
-
-    //
-
-    movl $1, %edi
-    movq (%rsp), %rax # Line*
-    leaq 1(%rax), %rsi # &line->vao
-    callxt glDeleteVertexArrays
-
-    movq (%rsp), %rax # Line*
-    movl 5(%rax), %edi # line->program
-    callxt glDeleteProgram
-
-    //
-
-    addq $8, %rsp
-    ret
-
-.align 16
-.type processObject, @function
+function processObject
 processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, esi)
     endbr64
-    PROCESS_OBJECT_STACK = 24
-    subq $PROCESS_OBJECT_STACK, %rsp # stack alignment, 8() Object*, 16() bool, 20() padding
-    movq %rdi, 8(%rsp) # * object
-    movl %esi, 16(%rsp) # renderOrDelete?
+    PROCESS_OBJECT_STACK = 24 # // 8 Object* + 4 bool/int + 12 padding
+    subq $PROCESS_OBJECT_STACK, %rsp # 0() Object*, 8() bool, 12() padding
+    movq %rdi, (%rsp) # * object
+    movl %esi, 8(%rsp) # renderOrDelete?
 
     //
 
     # movq %rdi, %rdi
-    movb 0(%rdi), %al # object->type
+    movl OBJECT_TYPE_OFFSET(%rdi), %eax # object->type
 
-    cmpb $0, %al # TYPE_TEXQUAD # testb?
+    cmpl $0, %eax # TYPE_TEXQUAD # testl?
     je .LprocessObject.texquad
-    cmpb $1, %al # TYPE_LINE
+    cmpl $1, %eax # TYPE_LINE
     je .LprocessObject.line
 
     xorl %eax, %eax
@@ -962,42 +960,40 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     //
 
 .LprocessObject.texquad:
+    # movl 8(%rsp), %esi # renderOrDelete?
     testl %esi, %esi
     jz .LprocessObject.texquad.delete
 
-    # movq %rdi, %rdi # * object
-    movq 8(%rsp), %rdi
+    movq (%rsp), %rdi # * object # TODO: optimize
     call renderTexquad
     jmp .LprocessObject.end
 .LprocessObject.texquad.delete:
-    # movq %rdi, %rdi # * object
-    movq 8(%rsp), %rdi
+    movq (%rsp), %rdi # * object
     call removeTexquad
     jmp .LprocessObject.end
 
     //
 
 .LprocessObject.line:
+    # movl 8(%rsp), %esi # renderOrDelete?
     testl %esi, %esi
     jz .LprocessObject.line.delete
 
-    # movq %rdi, %rdi # * object
-    movq 8(%rsp), %rdi
-    call renderLine
+    movq (%rsp), %rdi # * object
+    # call renderLine
     jmp .LprocessObject.end
 .LprocessObject.line.delete:
-    # movq %rdi, %rdi # * object
-    movq 8(%rsp), %rdi
-    call removeLine
+    movq (%rsp), %rdi # * object
+    # call removeLine
     jmp .LprocessObject.end
 
     //
 
 .LprocessObject.end:
-    movl 16(%rsp), %eax # renderOrDelete?
+    movl 8(%rsp), %eax # renderOrDelete?
     testl %eax, %eax
     jnz .LprocessObject.end.noFree
-    movq 8(%rsp), %rdi # * object
+    movq (%rsp), %rdi # * object
     callxt free
 .LprocessObject.end.noFree:
 
@@ -1006,14 +1002,13 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     addq $PROCESS_OBJECT_STACK, %rsp
     ret
 
-.align 16
-.type render, @function
+function render
 render:
     endbr64
     subq $8, %rsp # stack alignment and temp variable
 
     movl $0x8ca9, %edi # GL_DRAW_FRAMEBUFFER
-    movl 0+gMsaaFbo(%rip), %esi # gMsaaFbo.id
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %esi # gMsaaFbo.id
     callxt glBindFramebuffer
 
     //
@@ -1034,7 +1029,7 @@ render:
 .Lrender.loop:
     leaq gObjects(%rip), %rdi # &gObjects[0] = gObjects
     movl (%rsp), %esi # counter
-    movq (%rdi, %rsi, 8), %rdi # gObjects[counter]
+    movq 0(%rdi, %rsi, 8), %rdi # rdi = 0 + rdi + rsi * 8 = gObjects[counter] = Object*
     movl $1, %esi # true
     call processObject
 
@@ -1050,9 +1045,9 @@ render:
 
     // TODO: check every parameter in every call to gl functions (longword instead of quadword mistakes) <-----------------------------
 
-    subq $48, %rsp # 6 arguments
-    movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
-    movl 0+gPostprocessingFbo(%rip), %esi # gPostprocessingFbo.id
+    subq $48, %rsp # 6 arguments (8 bytes each due to pushq/popq)
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %esi # gPostprocessingFbo.id
     xorl %edx, %edx
     xorl %ecx, %ecx
     movl $WIDTH, %r8d
@@ -1072,8 +1067,7 @@ render:
     addq $8, %rsp
     ret
 
-.align 16
-.type createUbo, @function
+function createUbo
 createUbo:
     endbr64
     CREATE_UBO_STACK = 72 # // projection matrix of 4 vectors of 4 floats each 0(rsp) + 8 alignment
@@ -1083,14 +1077,15 @@ createUbo:
 
     pxor %xmm0, %xmm0 # 0.f
     movl $WIDTH, %eax
-    cvtsi2ss %eax, %xmm1 # (float) WIDTH
+    cvtsi2ss %eax, %xmm1 # (float) WIDTH # TODO: optimize - make parallel
+    pxor %xmm2, %xmm2 # 0.f
     movl $HEIGHT, %eax
-    cvtsi2ss %eax, %xmm2 # (float) HEIGHT
-    pxor %xmm3, %xmm3 # 0.f
+    cvtsi2ss %eax, %xmm3 # (float) HEIGHT
+    pxor %xmm4, %xmm4 # 0.f # TODO: replace with xorps
     movl $0x3f80000, %eax
-    movd %eax, %xmm4  # 1.f
+    movd %eax, %xmm5  # 1.f
     leaq (%rsp), %rdi # &projection
-    callxt glmc_ortho
+    callxt glmc_ortho # // <--
 
     //
 
@@ -1116,8 +1111,7 @@ createUbo:
     addq $CREATE_UBO_STACK, %rsp
     ret
 
-.align 16
-.type removeUbo, @function
+function removeUbo
 removeUbo:
     endbr64
     subq $8, %rsp # stack alignment
@@ -1129,8 +1123,7 @@ removeUbo:
     addq $8, %rsp # stack alignment
     ret
 
-.align 16
-.type createFbos, @function
+function createFbos
 createFbos:
     endbr64
     subq $8, %rsp # stack alignment
@@ -1139,12 +1132,12 @@ createFbos:
 
     movl $0x9100, %edi # GL_TEXTURE_2D_MULTISAMPLE
     movl $1, %esi
-    leaq 4+gMsaaFbo(%rip), %rdx # &gMsaaFbo.texture
+    leaq FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %rdx # &gMsaaFbo.texture
     callxt glCreateTextures
-    movl 4+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
     call assert
 
-    movl 4+gMsaaFbo(%rip), %edi # gMsaaFbo.texture
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.texture
     movl $4, %esi
     movl $0x8058, %edx # GL_RGBA8
     movl $WIDTH, %ecx
@@ -1155,50 +1148,50 @@ createFbos:
     //
 
     movl $1, %edi
-    leaq 0+gMsaaFbo(%rip), %rsi # &gMsaaFbo.id
+    leaq FBO_ID_OFFSET+gMsaaFbo(%rip), %rsi # &gMsaaFbo.id
     callxt glCreateFramebuffers
-    movl 0+gMsaaFbo(%rip), %eax # gMsaaFbo.id
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.id
     call assert
 
-    movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
-    movl 4+gMsaaFbo(%rip), %edx # gMsaaFbo.texture
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edx # gMsaaFbo.texture
     xorl %ecx, %ecx
     callxt glNamedFramebufferTexture
 
-    movl 0+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
     testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
-    xorl %eax, %eax
-    sete %al
+    sete %dl
+    movzx %dl, %eax
     call assert # // result == constant
 
     // postprocessing
 
     movl $0x0de1, %edi # GL_TEXTURE_2D
     movl $1, %esi
-    leaq 4+gPostprocessingFbo(%rip), %rdx # &gPostprocessingFbo.texture
+    leaq FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %rdx # &gPostprocessingFbo.texture
     callxt glCreateTextures
-    movl 4+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
     call assert
 
-    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
     movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
     movl $0x2601, %edx # GL_LINEAR
     callxt glTextureParameteri
 
-    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
     movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
     movl $0x2601, %edx # GL_LINEAR
     callxt glTextureParameteri
 
-    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
     movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
     movss gMaxAnisotropy(%rip), %xmm0
     callxt glTextureParameterf
 
-    movl 4+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
     movl $1, %esi
     movl $0x8058, %edx # GL_RGBA8
     movl $WIDTH, %ecx
@@ -1208,23 +1201,23 @@ createFbos:
     //
 
     movl $1, %edi
-    leaq 0+gPostprocessingFbo(%rip), %rsi # &gPostprocessingFbo.id
+    leaq FBO_ID_OFFSET+gPostprocessingFbo(%rip), %rsi # &gPostprocessingFbo.id
     callxt glCreateFramebuffers
-    movl 0+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
+    movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
     call assert
 
-    movl 0+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
+    movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
     movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
-    movl 4+gPostprocessingFbo(%rip), %edx # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %edx # gPostprocessingFbo.texture
     xorl %ecx, %ecx
     callxt glNamedFramebufferTexture
 
-    movl 0+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
+    movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
     testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
-    xorl %eax, %eax
-    sete %al
+    sete %dl
+    movzx %dl, %eax
     call assert # // result == constant
 
     //
@@ -1232,26 +1225,25 @@ createFbos:
     addq $8, %rsp # stack alignment
     ret
 
-.align 16
-.type removeFbos, @function
+function removeFbos
 removeFbos:
     endbr64
-    subq $8, %rsp # stack alignment and vector of 2 uints
+    subq $8, %rsp # stack alignment and vector of 2 uints // TODO: address of the vector isn't aligned
 
     //
 
-    movl 4+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
     movl %eax, 0(%rsp) # vector<uint>[0]
-    movl 4+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
     movl %eax, 4(%rsp) # vector<uint>[1]
 
     movl $2, %edi
     leaq 0(%rsp), %rsi # &vector
     callxt glDeleteTextures
 
-    movl 0+gMsaaFbo(%rip), %eax # gMsaaFbo.id
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.id
     movl %eax, 0(%rsp) # vector<uint>[0]
-    movl 0+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
+    movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
     movl %eax, 4(%rsp) # vector<uint>[1]
 
     movl $2, %edi
@@ -1263,14 +1255,13 @@ removeFbos:
     addq $8, %rsp # stack alignment
     ret
 
-.align 16
-.type togglePostprocessing, @function
+function togglePostprocessing
 togglePostprocessing: # receives bool (4 bytes) onOrOff
     endbr64
     subq $8, %rsp # stack alignment
     movl %edi, %edx # onOrOff?
 
-    movl 5+gPostprocessingTexquad(%rip), %edi # gPostprocessingTexquad.program
+    movl OBJECT_PROGRAM_OFFSET+gPostprocessingTexquad(%rip), %edi # gPostprocessingTexquad.program
     movl $2, %esi
     # movl %edx, %edx
     callxt glProgramUniform1i
@@ -1278,11 +1269,10 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     addq $8, %rsp # stack alignment
     ret
 
-.align 16
-.type createObjects, @function # ------------------> TODO: for buffers: aligned allocation and 8(%rsp) - would yield unaligned addr for buffer start -> change to 0(%rsp) (move padding to the other end)
+function createObjects # // ------------------> TODO: for buffers: aligned allocation and 8(%rsp) - would yield unaligned addr for buffer start -> change to 0(%rsp) (move padding to the other end)
 createObjects:
     endbr64
-    CREATE_OBJECTS_STACK = 88 # // 8 alignment and SDL_Surface* + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 + padding; 16(%rsp) = mat4 model
+    CREATE_OBJECTS_STACK = 88 # // 8 alignment and SDL_Surface* 0(%rsp) + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 + padding; 16(%rsp) = mat4 model
     subq $CREATE_OBJECTS_STACK, %rsp
 
     //
@@ -1295,32 +1285,25 @@ createObjects:
 
     //
 
+    # it's inside bss - it's initialized with zeroes on start
     # zeroing-out the object which is aligned itself
-    pxor %xmm0, %xmm0
-    movdqa %xmm0, 0+gPostprocessingTexquad(%rip)
-    movdqa %xmm0, 16+gPostprocessingTexquad(%rip)
-    movl $0, 32+gPostprocessingTexquad(%rip)
-    movw $0, 36+gPostprocessingTexquad(%rip)
+    # size = 48
+    # pxor %xmm0, %xmm0 # TODO: replace with avx2 (%ymm*)
+    # movdqa %xmm0, 0+gPostprocessingTexquad(%rip)
+    # movdqa %xmm0, 16+gPostprocessingTexquad(%rip)
+    # movdqa %xmm0, 32+gPostprocessingTexquad(%rip)
 
-    movb $0, 0+gPostprocessingTexquad(%rip) # TYPE_TEXQUAD, gPostprocessingTexquad.type
-    # movl $0, 1+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.vao
-    # movl $0, 5+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.program
-    movl $0, 9+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.x
-    movl $0, 13+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.y
-    movl $WIDTH, 17+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.w
-    movl $HEIGHT, 21+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.h
-    # movl $0, 25+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.vbo
-    # movl $0, 29+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.ebo
-    # movl $0, 33+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture
-    # movb $0, 37+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.clip
+    movl $TYPE_TEXQUAD, OBJECT_TYPE_OFFSET+gPostprocessingTexquad(%rip)
+    movl $WIDTH, TEXQUAD_W_OFFSET+gPostprocessingTexquad(%rip)
+    movl $HEIGHT, TEXQUAD_H_OFFSET+gPostprocessingTexquad(%rip)
 
     leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
     xorq %rsi, %rsi
     leaq 16(%rsp), %rdx # &model
     call createTexquad
 
-    movl 33+gPostprocessingTexquad(%rip), %eax # gPostprocessingTexquad.texture
-    movl %eax, 4+gPostprocessingFbo(%rip) # gPostprocessingFbo.texture
+    movl TEXQUAD_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
+    movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
 
     //
 
@@ -1329,25 +1312,21 @@ createObjects:
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
 
-    movl $38, %edi # sizeof(Texquad)
-    movl $1, %esi # 1 byte
+    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
+    movl $1, %esi
     callxt calloc
     movq %rax, 0+gObjects(%rip) # gObjects[0] = Texquad*
+    call assert
 
-    movb $0, 0(%rax) # TYPE_TEXQUAD, gObjects[0]->type
-    # movl $0, 1(%rax) # gObjects[0]->vao
-    # movl $0, 5(%rax) # gObjects[0]->program
-    movl $0x43520000, 9(%rax) # gObjects[0]->x # 210
-    movl $0x439b0000, 13(%rax) # gObjects[0]->y # 310
-    movl $420, 17(%rax) # gObjects[0]->w
-    movl $320, 21(%rax) # gObjects[0]->h
-    # movl $0, 25(%rax) # gObjects[0]->vbo
-    # movl $0, 29(%rax) # gObjects[0]->ebo
-    # movl $0, 33(%rax) # gObjects[0]->texture
-    # movb $0, 37(%rax) # gObjects[0]->clip
+    movq 0+gObjects(%rip), %rax # Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
+    movl $0x43520000, TEXQUAD_X_OFFSET(%rax) # 210
+    movl $0x439b0000, TEXQUAD_Y_OFFSET(%rax) # 310
+    movl $420, TEXQUAD_W_OFFSET(%rax)
+    movl $320, TEXQUAD_H_OFFSET(%rax)
 
     movq %rax, %rdi # gObjects[0]
-    movq (%rsp), %rsi # SDL_Surface*
+    movq (%rsp), %rsi # SDL_Surface*, no longer needed
     leaq 16(%rsp), %rdx # &model
     call createTexquad
 
@@ -1361,83 +1340,61 @@ createObjects:
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
 
-    movl $38, %edi # sizeof(Texquad)
-    movl $1, %esi # 1 byte
+    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
+    movl $1, %esi
     callxt calloc
     movq %rax, 8+gObjects(%rip) # gObjects[1] = Texquad*
+    call assert
 
-    movb $0, 0(%rax) # TYPE_TEXQUAD, gObjects[1]->type
-    # movl $0, 1(%rax) # gObjects[1]->vao
-    # movl $0, 5(%rax) # gObjects[1]->program
-    movl $0x42480000, 9(%rax) # gObjects[1]->x # 50
-    movl $0x42480000, 13(%rax) # gObjects[1]->y # 50
-    movl $320, 17(%rax) # gObjects[1]->w
-    movl $320, 21(%rax) # gObjects[1]->h
-    # movl $0, 25(%rax) # gObjects[1]->vbo
-    # movl $0, 29(%rax) # gObjects[1]->ebo
-    # movl $0, 33(%rax) # gObjects[1]->texture
-    movb $1, 37(%rax) # gObjects[1]->clip
+    movq 8+gObjects(%rip), %rax # gObjects[1] = Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
+    movl $0x42480000, TEXQUAD_X_OFFSET(%rax) # 50
+    movl $0x42480000, TEXQUAD_Y_OFFSET(%rax) # 50
+    movl $320, TEXQUAD_W_OFFSET(%rax)
+    movl $320, TEXQUAD_H_OFFSET(%rax)
+    movl $1, TEXQUAD_CLIP_OFFSET(%rax)
 
     movq %rax, %rdi # gObjects[1]
     movq (%rsp), %rsi # SDL_Surface*
     leaq 16(%rsp), %rdx # &model
     call createTexquad
 
-    movl $29, %edi # sizeof(Line)
-    movl $1, %esi # 1 byte
+    movl $LINE_SIZE, %edi # sizeof(Line)
+    movl $1, %esi
     callxt calloc
     movq %rax, 16+gObjects(%rip) # gObjects[2] = Line*
+    call assert
 
-    movb $1, 0(%rax) # TYPE_LINE, gObjects[2]->type
-    # movl $0, 1(%rax) # gObjects[2]->vao
-    # movl $0, 5(%rax) # gObjects[2]->program
-    movl $0x43fa0000, 9(%rax) # gObjects[2]->x0 # 500
-    movl $0x42c80000, 13(%rax) # gObjects[2]->y0 # 100
-    movl $0x44160000, 17(%rax) # gObjects[2]->x1 # 600
-    movl $0x42c80000, 21(%rax) # gObjects[2]->y1 # 100
-    movl $0x41200000, 25(%rax) # gObjects[2]->width # 10
+    movq 16+gObjects(%rip), %rax # gObjects[2] = Line*
+    movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
+    movl $0x43fa0000, LINE_X0_OFFSET(%rax) # 500
+    movl $0x42c80000, LINE_Y0_OFFSET(%rax) # 100
+    movl $0x44160000, LINE_X1_OFFSET(%rax) # 600
+    movl $0x42c80000, LINE_Y1_OFFSET(%rax) # 100
+    movl $0x41200000, LINE_WIDTH_OFFSET(%rax) # 10
 
     movq %rax, %rdi
     call createLine
-
-    // debug:
-
-    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
-    movl 1(%rax), %eax # object->vao
-    xprint DEBUG_D rax 0
-    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
-    movl 5(%rax), %eax # object->program
-    xprint DEBUG_D rax 0
-    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
-    movl 25(%rax), %eax # texquad->vbo
-    xprint DEBUG_D rax 0
-    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
-    movl 29(%rax), %eax # texquad->ebo
-    xprint DEBUG_D rax 0
-    movq 16+gObjects(%rip), %rax # Object* = gObjects[1]
-    movl 33(%rax), %eax # texquad->texture
-    xprint DEBUG_D rax 0
 
     //
 
     addq $CREATE_OBJECTS_STACK, %rsp
     ret
 
-.align 16
-.type removeObjects, @function
+function removeObjects
 removeObjects:
     endbr64
     subq $8, %rsp # stack alignment and counter
 
-    movl $0, (%rsp)
+    movl $0, (%rsp) # counter
 .LremoveObjects.loop:
     movl (%rsp), %eax # counter (i)
     leaq gObjects(%rip), %rdi # &gObjects[0]
-    movq (%rdi, %rax, 8), %rdi # gObjects[i]
+    movq 0(%rdi, %rax, 8), %rdi # 0 + rdi + rax * 8 # gObjects[i]
     xorl %esi, %esi # false
     call processObject
 
-    incl (%rsp) # i++
+    incl (%rsp) # i++ # TODO: use non-volatile register
 
     cmpl $OBJECTS, (%rsp) # while i < OBJECTS
     jl .LremoveObjects.loop
@@ -1451,9 +1408,8 @@ removeObjects:
 
     addq $8, %rsp # stack alignment
     ret
-
-.align 16
-.type loop, @function
+# xxx
+function loop
 loop:
     endbr64
 
@@ -1530,17 +1486,15 @@ loop:
     addq $LOOP_STACK, %rsp
     ret
 
-.align 16
-.type debugCallback, @function
+function debugCallback
 debugCallback:
     endbr64
     # ignore misalignment
     xprint DEBUG_S r9 0 # // push/pop stack - makes it temporary aligned so we don't have to do it here
     ret
 
-.align 16
-.type main, @function
 .global main
+function main
 main:
     endbr64
     MAIN_STACK = 24
