@@ -66,7 +66,7 @@ constant UNIFORM_MODEL
 UNIFORM_MODEL: .asciz "uModel"
 
 constant ENTRY_POINT
-ENTRY_POINT: .asciz "main" # TODO: remove
+ENTRY_POINT: .asciz "main"
 
 constant TEST_STR
 TEST_STR: .asciz "TEST"
@@ -171,7 +171,7 @@ variable gPostprocessingTexquad TEXQUAD_SIZE # // Texquad
     call *\n@gotpcrel(%rip)
 .endm
 
-.macro xprint f, r, x # // formatString registerInWhichTheValueIs(8 bytes) xmmRegistersUsedCount; pushes/pops 8 bytes
+.macro xprint f, r, x # // formatString registerInWhichTheValueIs(8 bytes) xmmRegistersUsedCount; pushes/pops 8 bytes; caller sets %xmms
     pushq $\f
     movq %rsp, %rdi
     movq %\r, %rsi
@@ -824,117 +824,120 @@ removeTexquad: # receives Texquad*
 
     addq $REMOVE_TEXQUAD_STACK, %rsp
     ret
-# xxx
-# function createLine
-# createLine: # receives Line*
-#     endbr64
-#     CREATE_LINE_STACK = 40
-#     subq $CREATE_LINE_STACK, %rsp # stack alignment and 0() Line*, 8() padding, 16() vector(4 * floats) + padding
-#     movq %rdi, (%rsp) # Line*
-# 
-#     movl $1, %edi
-#     movq (%rsp), %rax # Line*
-#     leaq 1(%rax), %rsi # &line->vao
-#     callxt glGenVertexArrays
-#     movq (%rsp), %rax # Line*
-#     movl 1(%rax), %eax # line->vao
-#     call assert
-# 
-#     //
-# 
-#     movl $LINE_VERTEX_SIZE, %edi
-#     leaq LINE_VERTEX(%rip), %rsi
-#     movl $LINE_FRAGMENT_SIZE, %edx
-#     leaq LINE_FRAGMENT(%rip), %rcx
-#     call makeShaders
-#     movq (%rsp), %rdi # Line*
-#     movl %eax, 5(%rdi) # line->program
-# 
-#     //
-# 
-#     # movq (%rsp), %rdi # Line*
-#     movl 5(%rdi), %edi # line->program
-#     xorl %esi, %esi
-#     movl $1, %edx
-#     movq (%rsp), %rcx # Line*
-#     leaq 9(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # <---------- TODO: unligned in struct
-#     callxt glProgramUniform4fv
-# 
-#     movq (%rsp), %rax # Line*
-#     movl 5(%rax), %edi # line->program
-#     movl $1, %esi
-#     movss 25(%rax), %xmm0 # line->width
-#     callxt glProgramUniform1f
-# 
-#     movq (%rsp), %rdi # Line*
-#     movl 5(%rdi), %edi # line->program
-#     movl $2, %esi
-#     movl $1, %edx
-#     movl $0, 16+0(%rsp)
-#     movl $0x3f800000, 16+4(%rsp) # 1.f
-#     movl $0, 16+8(%rsp)
-#     movl $0x3f800000, 16+12(%rsp) # 1.f
-#     leaq 16(%rsp), %rcx # &vector[0]
-#     callxt glProgramUniform4fv
-# 
-#     //
-# 
-#     addq $CREATE_LINE_STACK, %rsp
-#     ret
-# 
-# function renderLine
-# renderLine: # receives const Line*
-#     endbr64
-#     subq $8, %rsp # stack alignment
-#     movq %rdi, (%rsp) # Line* line
-# 
-#     //
-# 
-#     movq (%rsp), %rax # Line*
-#     movl 5(%rax), %edi # line->program
-#     callxt glUseProgram
-# 
-#     movq (%rsp), %rax # Line*
-#     movl 1(%rax), %edi # line->vao
-#     callxt glBindVertexArray
-# 
-#     movl $4, %edi # GL_TRIANGLES
-#     xorl %esi, %esi
-#     movl $6, %edx
-#     callxt glDrawArrays
-# 
-#     xorl %edi, %edi
-#     callxt glBindVertexArray
-# 
-#     xorl %edi, %edi
-#     callxt glUseProgram
-# 
-#     //
-# 
-#     addq $8, %rsp
-#     ret
-# 
-# function removeLine
-# removeLine: # receives Line* line
-#     endbr64
-#     subq $8, %rsp # stack alignment
-#     movq %rdi, (%rsp) # Line*
-# 
-#     //
-# 
-#     movl $1, %edi
-#     movq (%rsp), %rax # Line*
-#     leaq 1(%rax), %rsi # &line->vao
-#     callxt glDeleteVertexArrays
-# 
-#     movq (%rsp), %rax # Line*
-#     movl 5(%rax), %edi # line->program
-#     callxt glDeleteProgram
-# 
-#     //
-# 
-#     addq $8, %rsp
-#     ret
+
+function createLine
+createLine: # receives Line*
+    endbr64
+    CREATE_LINE_STACK = 24 # // 4 * 4 float + Line* = 16 + 8
+    subq $CREATE_LINE_STACK, %rsp # 0() vector(4 * floats), 16() Line* and stack alignment
+    movq %rdi, 16(%rsp) # Line*
+
+    movl $1, %edi
+    movq 16(%rsp), %rax # Line*
+    leaq OBJECT_VAO_OFFSET(%rax), %rsi # &line->vao
+    callxt glGenVertexArrays
+    movq 16(%rsp), %rax # Line*
+    movl OBJECT_VAO_OFFSET(%rax), %eax # line->vao
+    call assert
+
+    //
+
+    movl $LINE_VERTEX_SIZE, %edi
+    leaq LINE_VERTEX(%rip), %rsi
+    movl $LINE_FRAGMENT_SIZE, %edx
+    leaq LINE_FRAGMENT(%rip), %rcx
+    call makeShaders
+    movq 16(%rsp), %rdi # Line*
+    movl %eax, OBJECT_PROGRAM_OFFSET(%rdi) # line->program
+
+    //
+
+    movl %eax, %edi # line->program
+    xorl %esi, %esi
+    movl $1, %edx
+    movq 16(%rsp), %rcx # Line*
+    leaq LINE_X0_OFFSET(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # aligned inside the struct
+    callxt glProgramUniform4fv
+
+    movq 16(%rsp), %rax # Line*
+    movl OBJECT_PROGRAM_OFFSET(%rax), %edi # line->program
+    movl $1, %esi
+    movss LINE_WIDTH_OFFSET(%rax), %xmm0 # line->width
+    callxt glProgramUniform1f
+
+    # xmm0 = {0.f, 1.f, 0.f, 1.f}
+    # vector = xmm0, aligned
+    xorps %xmm0, %xmm0 # xmm0 = 0
+    movl $0x3f800000, %eax # 1.f
+    pinsrd $1, %eax, %xmm0 # xmm0[1] = 1.f
+    pinsrd $3, %eax, %xmm0 # xmm0[3] = 1.f
+    movaps %xmm0, (%rsp) # vector = xmm0
+
+    movq 16(%rsp), %rdi # Line*
+    movl OBJECT_PROGRAM_OFFSET(%rdi), %edi # line->program
+    movl $2, %esi
+    movl $1, %edx
+    leaq (%rsp), %rcx # &vector[0]
+    callxt glProgramUniform4fv
+
+    //
+
+    addq $CREATE_LINE_STACK, %rsp
+    ret
+
+function renderLine
+renderLine: # receives const Line*
+    endbr64
+    subq $8, %rsp # stack alignment
+    movq %rdi, (%rsp) # Line* line
+
+    //
+
+    # movq %rdi, %rdi
+    movl OBJECT_PROGRAM_OFFSET(%rdi), %edi # line->program
+    callxt glUseProgram
+
+    movq (%rsp), %rdi # Line*
+    movl OBJECT_VAO_OFFSET(%rdi), %edi # line->vao
+    callxt glBindVertexArray
+
+    movl $4, %edi # GL_TRIANGLES
+    xorl %esi, %esi
+    movl $6, %edx
+    callxt glDrawArrays
+
+    xorl %edi, %edi
+    callxt glBindVertexArray
+
+    xorl %edi, %edi
+    callxt glUseProgram
+
+    //
+
+    addq $8, %rsp
+    ret
+
+function removeLine
+removeLine: # receives Line* line
+    endbr64
+    subq $8, %rsp # stack alignment
+    movq %rdi, (%rsp) # Line*
+
+    //
+
+    movl $1, %edi
+    movq (%rsp), %rsi # Line*
+    leaq OBJECT_VAO_OFFSET(%rsi), %rsi # &line->vao
+    callxt glDeleteVertexArrays
+
+    movq (%rsp), %rdi # Line*
+    movl OBJECT_PROGRAM_OFFSET(%rdi), %edi # line->program
+    callxt glDeleteProgram
+
+    //
+
+    addq $8, %rsp
+    ret
 
 function processObject
 processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, esi)
@@ -980,11 +983,11 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     jz .LprocessObject.line.delete
 
     movq (%rsp), %rdi # * object
-    # call renderLine
+    call renderLine
     jmp .LprocessObject.end
 .LprocessObject.line.delete:
     movq (%rsp), %rdi # * object
-    # call removeLine
+    call removeLine
     jmp .LprocessObject.end
 
     //
@@ -1042,8 +1045,6 @@ render:
     movl $0x8ca9, %edi # GL_DRAW_FRAMEBUFFER
     xorl %esi, %esi
     callxt glBindFramebuffer
-
-    // TODO: check every parameter in every call to gl functions (longword instead of quadword mistakes) <-----------------------------
 
     subq $48, %rsp # 6 arguments (8 bytes each due to pushq/popq)
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
@@ -1493,9 +1494,9 @@ loop: # receives SDL_Window*
 
     addq $LOOP_STACK, %rsp
     ret
-# xxx
+
 function debugCallback
-debugCallback:
+debugCallback: # recieves many things, we care only about char* message 6h argument - r9
     endbr64
     # ignore misalignment
     xprint DEBUG_S r9 0 # // push/pop stack - makes it temporary aligned so we don't have to do it here
@@ -1505,7 +1506,7 @@ debugCallback:
 function main
 main:
     endbr64
-    MAIN_STACK = 24
+    MAIN_STACK = 24 # // SDL_Window* + SDL_GLContextState*
     subq $MAIN_STACK, %rsp # 0() window, 8() glContext, 16() padding; rsp initially is not 16-aligned so we need to add extra 8 -> 16 + 8 = 24
 
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
@@ -1513,7 +1514,7 @@ main:
     callxt SDL_SetHint
     call assert
 
-    movl $0x32, %edi # SDL_INIT_VIDEO
+    movl $0x20, %edi # SDL_INIT_VIDEO
     orl $0x4000, %edi # SDL_INIT_EVENTS
     callxt SDL_Init
     call assert
@@ -1527,8 +1528,8 @@ main:
     movl $0x3f800000, %eax # 1.f
     movd %eax, %xmm0
     callxt TTF_OpenFont
-    call assert
     movq %rax, gFont(%rip)
+    call assert
 
     movq gFont(%rip), %rdi
     movl $0x42f00000, %eax # 120.f
@@ -1581,7 +1582,7 @@ main:
 
     //
 
-    movq (%rsp), %rdi
+    movq (%rsp), %rdi # window
     callxt SDL_GL_CreateContext
     movq %rax, 8(%rsp) # glContext
     call assert
@@ -1601,8 +1602,9 @@ main:
     movl $0x8242, %edi # GL_DEBUG_OUTPUT_SYNCHRONOUS
     callxt glEnable
     leaq debugCallback(%rip), %rdi
+    xorq %rsi, %rsi # nullptr
     callxt glDebugMessageCallback
-
+# xxx
     //
 
     movl $0x809d, %edi # GL_MULTISAMPLE
@@ -1632,7 +1634,7 @@ main:
 
     //
 
-    movq (%rsp), %rdi
+    movq (%rsp), %rdi # window
     call loop
 
     //
