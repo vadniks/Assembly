@@ -17,6 +17,11 @@
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
 // --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+// vulkan-tools glslang for glsl to spirv compilation
+// glslangValidator -G texquad.vert -o texquad.vert.spv
+// glslangValidator -G texquad.frag -o texquad.frag.spv
+// glslangValidator -G line.vert -o line.vert.spv
+// glslangValidator -G line.frag -o line.frag.spv
 
 # TODO: optimize for cmovcc (conditional move), etc
 
@@ -198,15 +203,15 @@ variable gPostprocessingTexquad TEXQUAD_SIZE # // Texquad
 // every function's start address is 16-bytes aligned
 // malloc/calloc/realloc returns 16-bytes aligned addresses
 
-function assert
-assert: # first parameter int is in the eax for optimization's sake
-    endbr64
+// int3 - breakpoint
+
+.macro assert # checks eax as the first argument for optimization's sake
     testl %eax, %eax
-    jnz .Lassert.ret
+    jnz 1f
     ud2
-    # callxt abort
-.Lassert.ret:
-    ret
+1:
+    nop
+.endm
 
 function captureCanvas
 captureCanvas:
@@ -234,19 +239,19 @@ captureCanvas:
     leal WIDTH(%edi, %edi, 2), %r8d # // WIDTH + (WIDTH + WIDTH * 2) = WIDTH=edi * 4
     callxt SDL_CreateSurfaceFrom
     movq %rax, (%rsp) # SDL_Surface* surface
-    call assert
+    assert
 
     movq (%rsp), %rdi # SDL_Surface* surface
     movl $2, %esi # SDL_FLIP_VERTICAL
     callxt SDL_FlipSurface
-    call assert
+    assert
 
     //
 
     movq (%rsp), %rdi # SDL_Surface* surface
     leaq OUTPUT_IMAGE(%rip), %rsi
     callxt IMG_SavePNG
-    call assert
+    assert
 
     movq (%rsp), %rdi # SDL_Surface* surface
     callxt SDL_DestroySurface
@@ -274,7 +279,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glCreateVertexArrays
     movq (%rsp), %rax # uint* vao
     movl (%rax), %eax # vao
-    call assert
+    assert
 
     //
 
@@ -283,7 +288,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glCreateBuffers
     movq 8(%rsp), %rax # uint* vbo
     movl (%rax), %eax # vbo
-    call assert
+    assert
 
     movq 8(%rsp), %rdi # uint* vbo
     movl (%rdi), %edi # vbo
@@ -299,7 +304,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glCreateBuffers
     movq 16(%rsp), %rax # uint* ebo
     movl (%rax), %eax # ebo
-    call assert
+    assert
 
     movq 16(%rsp), %rdi # uint* ebo
     movl (%rdi), %edi # ebo
@@ -341,7 +346,7 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     movl $0x8b31, %edi # GL_VERTEX_SHADER
     callxt glCreateShader
     movl %eax, 24(%rsp) # vertexShader
-    call assert
+    assert
 
     movl $1, %edi
     leaq 24(%rsp), %rsi # &vertexShader
@@ -362,14 +367,14 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     leaq 36(%rsp), %rdx # &success
     callxt glGetShaderiv
     movl 36(%rsp), %eax # success
-    call assert
+    assert
 
     //
 
     movl $0x8b30, %edi # GL_FRAGMENT_SHADER
     callxt glCreateShader
     movl %eax, 28(%rsp) # fragmentShader
-    call assert
+    assert
 
     movl $1, %edi
     leaq 28(%rsp), %rsi # &fragmentShader
@@ -390,13 +395,13 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     leaq 36(%rsp), %rdx # &success
     callxt glGetShaderiv
     movl 36(%rsp), %eax # success
-    call assert
+    assert
 
     //
 
     callxt glCreateProgram
     movl %eax, 32(%rsp) # program
-    call assert
+    assert
 
     movl 32(%rsp), %edi # program
     movl 24(%rsp), %esi # vertexShader
@@ -414,7 +419,7 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     leaq 36(%rsp), %rdx # &success
     callxt glGetProgramiv
     movl 36(%rsp), %eax # success
-    call assert
+    assert
 
     //
 
@@ -426,7 +431,7 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
     leaq 36(%rsp), %rdx # &success
     callxt glGetProgramiv
     movl 36(%rsp), %eax # success
-    call assert
+    assert
 
     //
 
@@ -471,7 +476,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     callxt glCreateTextures
     movq (%rsp), %rax # Texquad*
     movl TEXQUAD_TEXTURE_OFFSET(%rax), %eax # texquad->texture
-    call assert
+    assert
 
     movq (%rsp), %rdi # Texquad*
     movl TEXQUAD_TEXTURE_OFFSET(%rdi), %edi # texquad->texture
@@ -724,7 +729,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     callxt TTF_RenderText_Blended
 .LcreateTexture.endCondition:
     movq %rax, 12(%rsp) # temp surface
-    call assert
+    assert
 
     //
 
@@ -732,7 +737,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movl $0x16762004, %esi # SDL_PIXELFORMAT_RGBA32
     callxt SDL_ConvertSurface
     movq %rax, 20(%rsp) # converted surface
-    call assert
+    assert
 
     movq 12(%rsp), %rdi # temp surface
     callxt SDL_DestroySurface
@@ -742,7 +747,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movq 20(%rsp), %rdi # converted surface
     movl $2, %esi # SDL_FLIP_VERTICAL
     callxt SDL_FlipSurface
-    call assert
+    assert
 
     //
 
@@ -838,7 +843,7 @@ createLine: # receives Line*
     callxt glGenVertexArrays
     movq 16(%rsp), %rax # Line*
     movl OBJECT_VAO_OFFSET(%rax), %eax # line->vao
-    call assert
+    assert
 
     //
 
@@ -952,13 +957,13 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     # movq %rdi, %rdi
     movl OBJECT_TYPE_OFFSET(%rdi), %eax # object->type
 
-    cmpl $0, %eax # TYPE_TEXQUAD # testl?
+    cmpl $0, %eax # TYPE_TEXQUAD # TODO: replace with 'and'
     je .LprocessObject.texquad
     cmpl $1, %eax # TYPE_LINE
     je .LprocessObject.line
 
     xorl %eax, %eax
-    call assert
+    assert
 
     //
 
@@ -1094,7 +1099,7 @@ createUbo:
     leaq gUbo(%rip), %rsi
     callxt glCreateBuffers
     movl gUbo(%rip), %eax
-    call assert
+    assert
 
     movl gUbo(%rip), %edi
     movl $64, %esi # sizeof(mat4)
@@ -1136,7 +1141,7 @@ createFbos:
     leaq FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %rdx # &gMsaaFbo.texture
     callxt glCreateTextures
     movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
-    call assert
+    assert
 
     movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.texture
     movl $4, %esi
@@ -1152,7 +1157,7 @@ createFbos:
     leaq FBO_ID_OFFSET+gMsaaFbo(%rip), %rsi # &gMsaaFbo.id
     callxt glCreateFramebuffers
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.id
-    call assert
+    assert
 
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
@@ -1163,10 +1168,8 @@ createFbos:
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
-    testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
-    sete %dl
-    movzx %dl, %eax
-    call assert # // result == constant
+    andl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
+    assert # // result == constant // <--------
 
     // postprocessing
 
@@ -1175,7 +1178,7 @@ createFbos:
     leaq FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %rdx # &gPostprocessingFbo.texture
     callxt glCreateTextures
     movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.texture
-    call assert
+    assert
 
     movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.texture
     movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
@@ -1205,7 +1208,7 @@ createFbos:
     leaq FBO_ID_OFFSET+gPostprocessingFbo(%rip), %rsi # &gPostprocessingFbo.id
     callxt glCreateFramebuffers
     movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %eax # gPostprocessingFbo.id
-    call assert
+    assert
 
     movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
     movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
@@ -1216,10 +1219,8 @@ createFbos:
     movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
-    testl $0x8cd5, %eax # GL_FRAMEBUFFER_COMPLETE
-    sete %dl
-    movzx %dl, %eax
-    call assert # // result == constant
+    andl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
+    assert # // result == constant
 
     //
 
@@ -1294,7 +1295,7 @@ createObjects:
     # movdqa %xmm0, 16+gPostprocessingTexquad(%rip)
     # movdqa %xmm0, 32+gPostprocessingTexquad(%rip)
 
-    movl $TYPE_TEXQUAD, OBJECT_TYPE_OFFSET+gPostprocessingTexquad(%rip)
+    movl $0, OBJECT_TYPE_OFFSET+gPostprocessingTexquad(%rip)
     movl $WIDTH, TEXQUAD_W_OFFSET+gPostprocessingTexquad(%rip)
     movl $HEIGHT, TEXQUAD_H_OFFSET+gPostprocessingTexquad(%rip)
 
@@ -1317,7 +1318,7 @@ createObjects:
     movl $1, %esi
     callxt calloc
     movq %rax, 0+gObjects(%rip) # gObjects[0] = Texquad*
-    call assert
+    assert
 
     movq 0+gObjects(%rip), %rax # Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
@@ -1345,7 +1346,7 @@ createObjects:
     movl $1, %esi
     callxt calloc
     movq %rax, 8+gObjects(%rip) # gObjects[1] = Texquad*
-    call assert
+    assert
 
     movq 8+gObjects(%rip), %rax # gObjects[1] = Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
@@ -1364,7 +1365,7 @@ createObjects:
     movl $1, %esi
     callxt calloc
     movq %rax, 16+gObjects(%rip) # gObjects[2] = Line*
-    call assert
+    assert
 
     movq 16+gObjects(%rip), %rax # gObjects[2] = Line*
     movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
@@ -1448,7 +1449,7 @@ loop: # receives SDL_Window*
 
     movq (%rsp), %rdi # * window
     callxt SDL_GL_SwapWindow
-    call assert
+    assert
 
     //
 
@@ -1512,24 +1513,24 @@ main:
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
     leaq VIDEO_DRIVERS(%rip), %rsi
     callxt SDL_SetHint
-    call assert
+    assert
 
     movl $0x20, %edi # SDL_INIT_VIDEO
     orl $0x4000, %edi # SDL_INIT_EVENTS
     callxt SDL_Init
-    call assert
+    assert
 
     //
 
     callxt TTF_Init
-    call assert
+    assert
 
     leaq FONT(%rip), %rdi
     movl $0x3f800000, %eax # 1.f
     movd %eax, %xmm0
     callxt TTF_OpenFont
     movq %rax, gFont(%rip)
-    call assert
+    assert
 
     movq gFont(%rip), %rdi
     movl $0x42f00000, %eax # 120.f
@@ -1537,38 +1538,38 @@ main:
     movl $100, %esi
     movl $100, %edx
     callxt TTF_SetFontSizeDPI
-    call assert
+    assert
 
     //
 
     movl $17, %edi # SDL_GL_CONTEXT_MAJOR_VERSION
     movl $4, %esi
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
     movl $18, %edi # SDL_GL_CONTEXT_MINOR_VERSION
     movl $6, %esi
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
     movl $20, %edi # SDL_GL_CONTEXT_PROFILE_MASK
     movl $1, %esi # SDL_GL_CONTEXT_PROFILE_CORE
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
     movl $13, %edi # SDL_GL_MULTISAMPLEBUFFERS
     movl $1, %esi
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
     movl $14, %edi # SDL_GL_MULTISAMPLESAMPLES
     movl $4, %esi
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
     movl $15, %edi # SDL_GL_ACCELERATED_VISUAL
     movl $1, %esi
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
     movl $19, %edi # SDL_GL_CONTEXT_FLAGS
     movl $1, %esi # SDL_GL_CONTEXT_DEBUG_FLAG
     callxt SDL_GL_SetAttribute
-    call assert
+    assert
 
     //
 
@@ -1578,14 +1579,14 @@ main:
     movl $2, %ecx # SDL_WINDOW_OPENGL
     callxt SDL_CreateWindow
     movq %rax, (%rsp) # window
-    call assert
+    assert
 
     //
 
     movq (%rsp), %rdi # window
     callxt SDL_GL_CreateContext
     movq %rax, 8(%rsp) # glContext
-    call assert
+    assert
 
     //
 
@@ -1604,7 +1605,7 @@ main:
     leaq debugCallback(%rip), %rdi
     xorq %rsi, %rsi # nullptr
     callxt glDebugMessageCallback
-# xxx
+
     //
 
     movl $0x809d, %edi # GL_MULTISAMPLE
@@ -1624,7 +1625,7 @@ main:
 
     movl $1, %edi
     callxt SDL_GL_SetSwapInterval
-    call assert
+    assert
 
     //
 
@@ -1641,7 +1642,7 @@ main:
 
     leaq 8(%rsp), %rdi # glContext
     callxt SDL_GL_DestroyContext
-    call assert
+    assert
 
     movq (%rsp), %rdi # window
     callxt SDL_DestroyWindow
