@@ -651,7 +651,14 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     movq (%rsp), %rax # Texquad*
     movl TEXQUAD_CLIP_OFFSET(%rax), %edi # texquad->clip
     testl %edi, %edi
-    jz .LcreateTexquad.skipTempVector
+    jnz .LcreateTexquad.calcVector
+
+    # 32() vec4(4 floats) temp, zero it out
+    xorps %xmm0, %xmm0
+    movaps %xmm0, 32(%rsp)
+    jmp .LcreateTexquad.calcVectorEnd
+
+.LcreateTexquad.calcVector:
 
     xorps %xmm0, %xmm0
     xorps %xmm1, %xmm1
@@ -680,13 +687,9 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     movsd %xmm0, 32+0(%rsp) # vector[0] = x + wHalf and vector[1] = y + hHalf
     extractps $0b00000000, %xmm1, 32+8(%rsp) # src: 0, dst: 0, zeroout: false; vector[2] = wHalf
     extractps $0b10000000, %xmm1, 32+12(%rsp) # src: 2, dst: 0, zeroout: false; vector[3] = hHalf
-.LcreateTexquad.skipTempVector:
-    # 32() vec4(4 floats) temp, zero it out
-    xorps %xmm0, %xmm0
-    movaps %xmm0, 32(%rsp)
+.LcreateTexquad.calcVectorEnd:
 
     //
-// TODO: check the name of all the functions
 
     # movq (%rsp), %rax # Texquad*
     movl OBJECT_PROGRAM_OFFSET(%rax), %edi # texquad->program
@@ -734,7 +737,7 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movq gFont(%rip), %rdi
     movq (%rsp), %rsi # imgPathOrText
     xorq %rdx, %rdx
-    movl $0x7f7f7fff, %ecx # (SDL_Color) {127, 127, 127, 255}
+    movl $0xff7f7f7f, %ecx # (SDL_Color) {127, 127, 127, 255}
     callxt TTF_RenderText_Blended
 .LcreateTexture.endCondition:
     movq %rax, 12(%rsp) # temp surface
@@ -1279,7 +1282,7 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     addq $8, %rsp # stack alignment
     ret
 
-function createObjects # // ------------------> TODO: for buffers: aligned allocation and 8(%rsp) - would yield unaligned addr for buffer start -> change to 0(%rsp) (move padding to the other end)
+function createObjects
 createObjects:
     endbr64
     CREATE_OBJECTS_STACK = 88 # // 8 alignment and SDL_Surface* 0(%rsp) + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 + padding; 16(%rsp) = mat4 model
