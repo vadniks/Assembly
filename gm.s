@@ -98,6 +98,9 @@ constant LINE_FRAGMENT
 LINE_FRAGMENT: .incbin "line.frag.spv"
 LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 
+constant FLOATS
+FLOATS: .float 1.0, 2.0
+
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
 
@@ -554,25 +557,25 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     # ecx = x + w
     # r8d = y + h
 
-    # xmm0: width, 1, height, - (ints)
-    # then: width, 1, height, - (floats)
+    xorps %xmm0, %xmm0
+
+    # xmm0: width, -, height, - (ints)
+    # then: width, -, height, - (floats)
     movq (%rsp), %rax # Texquad*
-    insertps $0, TEXQUAD_W_OFFSET(%rax), %xmm0 # texquad->w
-    movl $1, %edi
-    pinsrd $1, %edi, %xmm0 # 1
-    insertps $2, TEXQUAD_H_OFFSET(%rax), %xmm0 # texquad->h
+    insertps $0b00000000, TEXQUAD_W_OFFSET(%rax), %xmm0 # 00-00-0000 bits 0-7 from left to right - src: 0, dst: 0, zeroout: false; texquad->w
+    insertps $0b00100000, TEXQUAD_H_OFFSET(%rax), %xmm0 # src: 0, dst: 2, zeroout: false; texquad->h
     cvtdq2ps %xmm0, %xmm0
-    extractps $1, %xmm0, %edi # 1.f
+    movl FLOATS+0(%rip), %edi # 1.f
     # xmm0: width, x, height, y (floats)
     # then: width + x, height + y, -, - (floats)
-    insertps $1, TEXQUAD_X_OFFSET(%rax), %xmm0 # texquad->x
-    insertps $3, TEXQUAD_Y_OFFSET(%rax), %xmm0 # texquad->y
+    insertps $0b00010000, TEXQUAD_X_OFFSET(%rax), %xmm0 # src: 0, dst: 1, zeroout: false; texquad->x
+    insertps $0b00110000, TEXQUAD_Y_OFFSET(%rax), %xmm0 # src: 0, dst: 3, zeroout: false; texquad->y
     haddps %xmm0, %xmm0 # xmm0[0] = xmm0[0] + xmm0[1], xmm0[1] = xmm0[2] + xmm0[3]
 
     # vertices = vector
-    extractps $0, %xmm0, %ecx # x + w
+    extractps $0b00000000, %xmm0, %ecx # src: 0, dst: 0, zeroout: false; x + w
     movl %ecx, 32+0(%rsp) # vector[0] = x + w
-    extractps $1, %xmm0, %r8d # y + h
+    extractps $0b01000000, %xmm0, %r8d # src: 1, dst: 0, zeroout: false; y + h
     movl %r8d, 32+4(%rsp) # vector[1] = y + h
     movl %edi, 32+8(%rsp) # vector[2] = 1.f
     movl %edi, 32+12(%rsp) # vector[3] = 1.f
@@ -650,30 +653,33 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     testl %edi, %edi
     jz .LcreateTexquad.skipTempVector
 
+    xorps %xmm0, %xmm0
+    xorps %xmm1, %xmm1
+
     # xmm0: texquad->w, -, texquad->h, - (ints)
     # then: ... (floats)
-    insertps $0, TEXQUAD_W_OFFSET(%rax), %xmm0 # xmm0[0] = texquad->w
-    insertps $2, TEXQUAD_H_OFFSET(%rax), %xmm0 # xmm0[2] = texquad->h
+    insertps $0b00000000, TEXQUAD_W_OFFSET(%rax), %xmm0 # src: 0, dst: 0, zeroout: false; xmm0[0] = texquad->w
+    insertps $0b00100000, TEXQUAD_H_OFFSET(%rax), %xmm0 # src: 0, dst: 2, zeroout: false; xmm0[2] = texquad->h
     cvtdq2ps %xmm0, %xmm0
     # xmm1: 2.f, -, 2.f, - (floats)
-    movl $0x40000000, %edi # 2.f
-    pinsrd $0, %edi, %xmm1
-    pinsrd $2, %edi, %xmm1
+    insertps $0b00000000, FLOATS+4(%rip), %xmm1 # src: 0, dst: 0, zeroout: false; xmm1[0] = 2.f
+    insertps $0b00100000, FLOATS+4(%rip), %xmm1 # src: 0, dst: 2, zeroout: false; xmm1[2] = 2.f
+
     # xmm0: texquad->w / 2.f, -, texquad->h / 2.f, - (floats)
     divps %xmm1, %xmm0
     movaps %xmm0, %xmm1 # copy xmm0 to xmm1
 
     # xmm0: wHalf, -, hHalf, - (floats)
     # then: wHalf, x, hHalf, y (floats)
-    insertps $1, TEXQUAD_X_OFFSET(%rax), %xmm0 # texquad->x
-    insertps $3, TEXQUAD_Y_OFFSET(%rax), %xmm0 # texquad->y
+    insertps $0b00010000, TEXQUAD_X_OFFSET(%rax), %xmm0 # src: 0, dst: 1, zeroout: false; texquad->x
+    insertps $0b00110000, TEXQUAD_Y_OFFSET(%rax), %xmm0 # src: 0, dst: 3, zeroout: false; texquad->y
     # xmm0: wHalf + x, hHalf + y, -, - (floats)
     haddps %xmm0, %xmm0
 
     # 32() vec4(4 floats) temp
     movsd %xmm0, 32+0(%rsp) # vector[0] = x + wHalf and vector[1] = y + hHalf
-    extractps $0, %xmm1, 32+8(%rsp) # vector[2] = wHalf
-    extractps $2, %xmm1, 32+12(%rsp) # vector[3] = hHalf
+    extractps $0b00000000, %xmm1, 32+8(%rsp) # src: 0, dst: 0, zeroout: false; vector[2] = wHalf
+    extractps $0b10000000, %xmm1, 32+12(%rsp) # src: 2, dst: 0, zeroout: false; vector[3] = hHalf
 .LcreateTexquad.skipTempVector:
     # 32() vec4(4 floats) temp, zero it out
     xorps %xmm0, %xmm0
@@ -874,9 +880,8 @@ createLine: # receives Line*
     # xmm0 = {0.f, 1.f, 0.f, 1.f}
     # vector = xmm0, aligned
     xorps %xmm0, %xmm0 # xmm0 = 0
-    movl $0x3f800000, %eax # 1.f
-    pinsrd $1, %eax, %xmm0 # xmm0[1] = 1.f
-    pinsrd $3, %eax, %xmm0 # xmm0[3] = 1.f
+    insertps $0b00010000, FLOATS+0(%rip), %xmm0 # src: 0, dst: 1, zeroout: false; xmm0[1] = 1.f
+    insertps $0b00110000, FLOATS+0(%rip), %xmm0 # src: 0, dst: 3, zeroout: false; xmm0[3] = 1.f
     movaps %xmm0, (%rsp) # vector = xmm0
 
     movq 16(%rsp), %rdi # Line*
@@ -1022,11 +1027,10 @@ render:
 
     //
 
-    movl $0x3f80000, %eax # 1.f
-    movd %eax, %xmm0
-    movd %eax, %xmm1
-    movd %eax, %xmm2
-    movd %eax, %xmm3
+    movss FLOATS+0(%rip), %xmm0 # 1.f
+    movss FLOATS+0(%rip), %xmm1 # 1.f
+    movss FLOATS+0(%rip), %xmm2 # 1.f
+    movss FLOATS+0(%rip), %xmm3 # 1.f
     callxt glClearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
@@ -1082,15 +1086,18 @@ createUbo:
 
     //
 
-    pxor %xmm0, %xmm0 # 0.f
-    movl $WIDTH, %eax
-    cvtsi2ss %eax, %xmm1 # (float) WIDTH # TODO: optimize - make parallel
-    pxor %xmm2, %xmm2 # 0.f
-    movl $HEIGHT, %eax
-    cvtsi2ss %eax, %xmm3 # (float) HEIGHT
-    pxor %xmm4, %xmm4 # 0.f # TODO: replace with xorps
-    movl $0x3f80000, %eax
-    movd %eax, %xmm5  # 1.f
+    movl $WIDTH, (%rsp) # temp
+    movl $HEIGHT, 4(%rsp) # temp
+    movlpd (%rsp), %xmm0 # xmm0[0-1 of 4] = quadword; moves 8 bytes to lower 8 bytes of xmm0
+    cvtdq2ps %xmm0, %xmm0 # convert them to floats
+    insertps $0b00001110, %xmm0, %xmm1 # src: 0, dst: 0, zeroout: 1_2_3; xmm1[0] = xmm0[0]
+    insertps $0b01001110, %xmm0, %xmm3 # src: 1, dst: 0, zeroout: 1_2_3; xmm3[0] = xmm0[1]
+    xorps %xmm0, %xmm0
+    # xmm1
+    xorps %xmm2, %xmm2
+    # xmm3
+    xorps %xmm4, %xmm4
+    movss FLOATS+0(%rip), %xmm5 # 1.f
     leaq (%rsp), %rdi # &projection
     callxt glmc_ortho
 
@@ -1427,11 +1434,10 @@ loop: # receives SDL_Window*
     //
 
     # movl $0x3f80000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
-    movl $1, %eax
-    cvtsi2ss %eax, %xmm0 # convert to float
-    movss %xmm0, %xmm1
-    movss %xmm0, %xmm2
-    movss %xmm0, %xmm3
+    movss FLOATS+0(%rip), %xmm0
+    movss FLOATS+0(%rip), %xmm1
+    movss FLOATS+0(%rip), %xmm2
+    movss FLOATS+0(%rip), %xmm3
     callxt glClearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
@@ -1520,8 +1526,7 @@ main:
     assert
 
     leaq FONT(%rip), %rdi
-    movl $0x3f800000, %eax # 1.f
-    movd %eax, %xmm0
+    movss FLOATS+0(%rip), %xmm0 # 1.f
     callxt TTF_OpenFont
     movq %rax, gFont(%rip)
     assert
