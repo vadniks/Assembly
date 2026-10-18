@@ -33,10 +33,13 @@ HEIGHT = 640
 UPDATE_PERIOD = 16
 OBJECTS = 3
 
+# little endian
 DEBUG_S = 0x0a7325 # // %s\n
 DEBUG_P = 0x0a7025 # // %p\n
 DEBUG_D = 0x0a6425 # // %d\n
 DEBUG_F = 0x0a6625 # // %f\n
+DEBUG_A = 0x0a61 # // a\n
+DEBUG_B = 0x0a62 # // b\n
 TEST_STR = 0x0a54534554 # // TEST\n
 
 .macro constant n # // name
@@ -185,7 +188,7 @@ variable gPostprocessingTexquad TEXQUAD_SIZE # // Texquad
     popq %rax
 .endm
 
-.macro debug s, c # // string (in a form of bytes in a number (8 bytes long max)), count; example: debug 0x0a61, 2 // "a\n"
+.macro debug s, c # // string (in a form of bytes in a number (8 bytes long max)), count; example: debug 0x0a61 2 // "a\n"
     pushq $\s
     movl $1, %eax
     movl $1, %edi
@@ -766,12 +769,10 @@ renderTexquad: # receives Texquad*
     #movq %rdi, %rdi # texquad
     movl OBJECT_PROGRAM_OFFSET(%rdi), %edi # *(Texquad* + OFF) = texquad->program
     callxt glUseProgram
-
     movl $0x0de1, %edi # GL_TEXTURE_2D
     movq (%rsp), %rsi # Texquad*
     movl TEXQUAD_TEXTURE_OFFSET(%rsi), %esi # *(Texquad* + OFF) = texquad->texture
     callxt glBindTexture
-
     movq (%rsp), %rax # Texquad*
     movl OBJECT_VAO_OFFSET(%rax), %edi # texquad->vao
     callxt glBindVertexArray
@@ -1091,7 +1092,7 @@ createUbo:
     movl $0x3f80000, %eax
     movd %eax, %xmm5  # 1.f
     leaq (%rsp), %rdi # &projection
-    callxt glmc_ortho # // <--
+    callxt glmc_ortho
 
     //
 
@@ -1169,7 +1170,7 @@ createFbos:
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
     andl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
-    assert # // result == constant // <--------
+    assert # // result == constant
 
     // postprocessing
 
@@ -1287,14 +1288,7 @@ createObjects:
 
     //
 
-    # it's inside bss - it's initialized with zeroes on start
-    # zeroing-out the object which is aligned itself
-    # size = 48
-    # pxor %xmm0, %xmm0 # TODO: replace with avx2 (%ymm*)
-    # movdqa %xmm0, 0+gPostprocessingTexquad(%rip)
-    # movdqa %xmm0, 16+gPostprocessingTexquad(%rip)
-    # movdqa %xmm0, 32+gPostprocessingTexquad(%rip)
-
+    # everything inside .bss is initialized with zeroes
     movl $0, OBJECT_TYPE_OFFSET+gPostprocessingTexquad(%rip)
     movl $WIDTH, TEXQUAD_W_OFFSET+gPostprocessingTexquad(%rip)
     movl $HEIGHT, TEXQUAD_H_OFFSET+gPostprocessingTexquad(%rip)
@@ -1304,7 +1298,7 @@ createObjects:
     leaq 16(%rsp), %rdx # &model
     call createTexquad
 
-    movl TEXQUAD_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
     movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
 
     //
