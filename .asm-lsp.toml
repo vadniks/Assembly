@@ -1,0 +1,11 @@
+[default_config]
+assembler = "gas"
+instruction_set = "x86/x86-64"
+
+[opts]
+compiler = "gcc"
+diagnostics = true
+default_diagnostics = true
+
+[default_config.opts]
+compiler = "riscv64-unknown-elf-gcc"

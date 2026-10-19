@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Vadim Nikolaev (https://github.com/vadniks)
 // SPDX-License-Identifier: GPL-3.0-only
 
-// THE FILE/PROJECT IS STILL IN DEVELOPMENT (IS BEING PORTED FROM C CODE)
-
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
 //     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
@@ -16,14 +14,13 @@
 // Version: dated July 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// --> current: gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+// gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
 // glslangValidator -G texquad.frag -o texquad.frag.spv
 // glslangValidator -G line.vert -o line.vert.spv
 // glslangValidator -G line.frag -o line.frag.spv
-
-# TODO: optimize for cmovcc (conditional move), etc
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
