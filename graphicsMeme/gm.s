@@ -15,7 +15,6 @@
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
 // gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
-
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
 // glslangValidator -G texquad.frag -o texquad.frag.spv
@@ -126,9 +125,11 @@ OBJECT_TYPE_OFFSET = 0
 OBJECT_VAO_OFFSET = 4
 OBJECT_PROGRAM_OFFSET = 8
 
+// -----------------------------------> TODO: replace sse with avx or vex-sse
+
 # typedef struct {
 #     Object; // ms-anon-structure-tag = copies the whole structure
-#     GLfloat x, y;
+#     GLuint x, y;
 #     GLuint w, h, vbo, ebo, texture;
 #     bool clip;
 # } Texquad; // size = 16 + 8 * 4 = 48
@@ -145,7 +146,7 @@ TEXQUAD_CLIP_OFFSET = 44
 
 # typedef struct {
 #     Object; // ms-anon-structure-tag = copies the whole structure
-#     GLfloat x0, y0, x1, y1, width;
+#     GLuint x0, y0, x1, y1, width;
 #     <long padding>;
 #     <int padding>;
 # } Line; // size = 16 + 5 * 4 + 12 padding = 48
@@ -459,12 +460,13 @@ makeShaders: # returns uint program; int vertexSize, char* vertex, int fragmentS
 function createTexquad
 createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - pointer
     endbr64
-    CREATE_TEXQUAD_STACK = 104 # // 0 alignment + 3 * 8 pointers + vec(4 * 4 floats * 4 bytes each)=64 + 16 padding
+    CREATE_TEXQUAD_STACK = 120 # // 3 * 8 pointers + 8 padding + vec(4 * 4 floats * 4 bytes each)=64 + 8 padding + 16 temp xmm vector
     subq $CREATE_TEXQUAD_STACK, %rsp
     movq %rdi, (%rsp) # Texquad*
     movq %rsi, 8(%rsp) # SDL_Surface*
     movq %rdx, 16(%rsp) # model
     # 32() vec4 vertices
+    # 96() temp xmm vector {w, x, h, y} (floats)
 
     //
 
@@ -556,34 +558,39 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
 
     xorps %xmm0, %xmm0
 
-    # xmm0: width, -, height, - (ints)
-    # then: width, -, height, - (floats)
+    # insertps 00-00-0000 dd-ss-zzzz <binary>-<binary>-3210=<position from right to left> src: 0, dst: 0, zeroout: false
+    # extractps 0-3 = elementNo
+
+    # xmm0: x, y, w, h (ints)
+    # then: x, y, w, h (floats)
     movq (%rsp), %rax # Texquad*
-    insertps $0b00000000, TEXQUAD_W_OFFSET(%rax), %xmm0 # 00-00-0000 bits 0-7 from left to right - src: 0, dst: 0, zeroout: false; texquad->w
-    insertps $0b00100000, TEXQUAD_H_OFFSET(%rax), %xmm0 # src: 0, dst: 2, zeroout: false; texquad->h
+    movaps TEXQUAD_X_OFFSET(%rax), %xmm0 # move all the values at once
     cvtdq2ps %xmm0, %xmm0
-    movl FLOATS+0(%rip), %edi # 1.f
-    # xmm0: width, x, height, y (floats)
-    # then: width + x, height + y, -, - (floats)
-    insertps $0b00010000, TEXQUAD_X_OFFSET(%rax), %xmm0 # src: 0, dst: 1, zeroout: false; texquad->x
-    insertps $0b00110000, TEXQUAD_Y_OFFSET(%rax), %xmm0 # src: 0, dst: 3, zeroout: false; texquad->y
+
+    extractps $1, %xmm0, %esi # y
+    extractps $0, %xmm0, %edx # x
+
+    # xmm0: w, x, h, y (floats)
+    # then: x + w, y + h, -, - (floats)
+    shufps $0b01110010, %xmm0, %xmm0 # originalElementNo->resultElementNo 0->01=1 1->11=3 2->00=0 3->10=2
+    movaps %xmm0, 96(%rsp) # temp xmm vector
     haddps %xmm0, %xmm0 # xmm0[0] = xmm0[0] + xmm0[1], xmm0[1] = xmm0[2] + xmm0[3]
 
+    movl FLOATS+0(%rip), %edi # 1.f
+    extractps $0, %xmm0, %ecx # x + w
+    extractps $1, %xmm0, %r8d # y + h
+
     # vertices = vector
-    extractps $0b00000000, %xmm0, %ecx # src: 0, dst: 0, zeroout: false; x + w
     movl %ecx, 32+0(%rsp) # vector[0] = x + w
-    extractps $0b01000000, %xmm0, %r8d # src: 1, dst: 0, zeroout: false; y + h
     movl %r8d, 32+4(%rsp) # vector[1] = y + h
     movl %edi, 32+8(%rsp) # vector[2] = 1.f
     movl %edi, 32+12(%rsp) # vector[3] = 1.f
     #
     movl %ecx, 32+16(%rsp) # vector[4] = x + w
-    movl TEXQUAD_Y_OFFSET(%rax), %esi # texquad->y
     movl %esi, 32+20(%rsp) # vector[5] = texquad->y
     movl %edi, 32+24(%rsp) # vector[6] = 1.f
     movl $0, 32+28(%rsp) # vector[7] = 0.f
     #
-    movl TEXQUAD_X_OFFSET(%rax), %edx # texquad->x
     movl %edx, 32+32(%rsp) # vector[8] = texquad->x
     movl %esi, 32+36(%rsp) # vector[9] = texquad->y
     movl $0, 32+40(%rsp) # vector[10] = 0.f
@@ -660,30 +667,25 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     xorps %xmm0, %xmm0
     xorps %xmm1, %xmm1
 
-    # xmm0: texquad->w, -, texquad->h, - (ints)
-    # then: ... (floats)
-    insertps $0b00000000, TEXQUAD_W_OFFSET(%rax), %xmm0 # src: 0, dst: 0, zeroout: false; xmm0[0] = texquad->w
-    insertps $0b00100000, TEXQUAD_H_OFFSET(%rax), %xmm0 # src: 0, dst: 2, zeroout: false; xmm0[2] = texquad->h
-    cvtdq2ps %xmm0, %xmm0
-    # xmm1: 2.f, -, 2.f, - (floats)
-    insertps $0b00000000, FLOATS+4(%rip), %xmm1 # src: 0, dst: 0, zeroout: false; xmm1[0] = 2.f
-    insertps $0b00100000, FLOATS+4(%rip), %xmm1 # src: 0, dst: 2, zeroout: false; xmm1[2] = 2.f
+    # xmm0: w, x, h, y (floats)
+    movaps 96(%rsp), %xmm0
 
-    # xmm0: texquad->w / 2.f, -, texquad->h / 2.f, - (floats)
+    # xmm1: 2.f, 1.f, 2.f, 1.f (floats)
+    insertps $0b00000000, FLOATS+4(%rip), %xmm1 # src: 0, dst: 0, zeroout: false; xmm1[0] = 2.f
+    insertps $0b00010000, FLOATS+0(%rip), %xmm1 # src: 0, dst: 1, zeroout: false; xmm1[1] = 1.f
+    insertps $0b00100000, FLOATS+4(%rip), %xmm1 # src: 0, dst: 2, zeroout: false; xmm1[2] = 2.f
+    insertps $0b00110000, FLOATS+0(%rip), %xmm1 # src: 0, dst: 3, zeroout: false; xmm1[3] = 1.f
+
+    # xmm0: texquad->w / 2.f, x, texquad->h / 2.f, y (floats)
     divps %xmm1, %xmm0
     movaps %xmm0, %xmm1 # copy xmm0 to xmm1
-
-    # xmm0: wHalf, -, hHalf, - (floats)
-    # then: wHalf, x, hHalf, y (floats)
-    insertps $0b00010000, TEXQUAD_X_OFFSET(%rax), %xmm0 # src: 0, dst: 1, zeroout: false; texquad->x
-    insertps $0b00110000, TEXQUAD_Y_OFFSET(%rax), %xmm0 # src: 0, dst: 3, zeroout: false; texquad->y
     # xmm0: wHalf + x, hHalf + y, -, - (floats)
     haddps %xmm0, %xmm0
 
     # 32() vec4(4 floats) temp
     movsd %xmm0, 32+0(%rsp) # vector[0] = x + wHalf and vector[1] = y + hHalf
-    extractps $0b00000000, %xmm1, 32+8(%rsp) # src: 0, dst: 0, zeroout: false; vector[2] = wHalf
-    extractps $0b10000000, %xmm1, 32+12(%rsp) # src: 2, dst: 0, zeroout: false; vector[3] = hHalf
+    extractps $0, %xmm1, 32+8(%rsp) # vector[2] = wHalf
+    extractps $2, %xmm1, 32+12(%rsp) # vector[3] = hHalf
 .LcreateTexquad.calcVectorEnd:
 
     //
@@ -708,6 +710,7 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     //
 
     addq $CREATE_TEXQUAD_STACK, %rsp
+    movq %rsp, %rax
     ret
 
 function createTexture
@@ -868,13 +871,17 @@ createLine: # receives Line*
     xorl %esi, %esi
     movl $1, %edx
     movq 16(%rsp), %rcx # Line*
-    leaq LINE_X0_OFFSET(%rcx), %rcx # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # aligned inside the struct
+    movaps LINE_X0_OFFSET(%rcx), %xmm0 # &line->x0 = &vecor(line->x0, line->y0, line->x1, line->y1) # aligned inside the struct
+    cvtdq2ps %xmm0, %xmm0 # floats
+    movaps %xmm0, (%rsp) # vector
+    leaq (%rsp), %rcx # &vector, no longer needed
     callxt glProgramUniform4fv
 
     movq 16(%rsp), %rax # Line*
     movl OBJECT_PROGRAM_OFFSET(%rax), %edi # line->program
     movl $1, %esi
-    movss LINE_WIDTH_OFFSET(%rax), %xmm0 # line->width
+    movl LINE_WIDTH_OFFSET(%rax), %edx # line->width
+    cvtsi2ss %edx, %xmm0
     callxt glProgramUniform1f
 
     # xmm0 = {0.f, 1.f, 0.f, 1.f}
@@ -1090,8 +1097,8 @@ createUbo:
     movl $HEIGHT, 4(%rsp) # temp
     movlpd (%rsp), %xmm0 # xmm0[0-1 of 4] = quadword; moves 8 bytes to lower 8 bytes of xmm0
     cvtdq2ps %xmm0, %xmm0 # convert them to floats
-    insertps $0b00001110, %xmm0, %xmm1 # src: 0, dst: 0, zeroout: 1_2_3; xmm1[0] = xmm0[0]
-    insertps $0b01001110, %xmm0, %xmm3 # src: 1, dst: 0, zeroout: 1_2_3; xmm3[0] = xmm0[1]
+    insertps $0b00001110, %xmm0, %xmm1 # src: 0, dst: 0, zeroout: 1_2_3; xmm1[0] = xmm0[0] #  1  0 3210
+    insertps $0b01001110, %xmm0, %xmm3 # src: 1, dst: 0, zeroout: 1_2_3; xmm3[0] = xmm0[1] # 01-00-1110
     xorps %xmm0, %xmm0
     # xmm1
     xorps %xmm2, %xmm2
@@ -1323,8 +1330,8 @@ createObjects:
 
     movq 0+gObjects(%rip), %rax # Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $0x43520000, TEXQUAD_X_OFFSET(%rax) # 210
-    movl $0x439b0000, TEXQUAD_Y_OFFSET(%rax) # 310
+    movl $210, TEXQUAD_X_OFFSET(%rax)
+    movl $310, TEXQUAD_Y_OFFSET(%rax)
     movl $420, TEXQUAD_W_OFFSET(%rax)
     movl $320, TEXQUAD_H_OFFSET(%rax)
 
@@ -1351,8 +1358,8 @@ createObjects:
 
     movq 8+gObjects(%rip), %rax # gObjects[1] = Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $0x42480000, TEXQUAD_X_OFFSET(%rax) # 50
-    movl $0x42480000, TEXQUAD_Y_OFFSET(%rax) # 50
+    movl $50, TEXQUAD_X_OFFSET(%rax)
+    movl $50, TEXQUAD_Y_OFFSET(%rax)
     movl $320, TEXQUAD_W_OFFSET(%rax)
     movl $320, TEXQUAD_H_OFFSET(%rax)
     movl $1, TEXQUAD_CLIP_OFFSET(%rax)
@@ -1370,11 +1377,11 @@ createObjects:
 
     movq 16+gObjects(%rip), %rax # gObjects[2] = Line*
     movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
-    movl $0x43fa0000, LINE_X0_OFFSET(%rax) # 500
-    movl $0x42c80000, LINE_Y0_OFFSET(%rax) # 100
-    movl $0x44160000, LINE_X1_OFFSET(%rax) # 600
-    movl $0x42c80000, LINE_Y1_OFFSET(%rax) # 100
-    movl $0x41200000, LINE_WIDTH_OFFSET(%rax) # 10
+    movl $500, LINE_X0_OFFSET(%rax)
+    movl $100, LINE_Y0_OFFSET(%rax)
+    movl $600, LINE_X1_OFFSET(%rax)
+    movl $100, LINE_Y1_OFFSET(%rax)
+    movl $10, LINE_WIDTH_OFFSET(%rax)
 
     movq %rax, %rdi
     call createLine
@@ -1507,8 +1514,27 @@ debugCallback: # recieves many things, we care only about char* message 6h argum
 function main
 main:
     endbr64
-    MAIN_STACK = 24 # // SDL_Window* + SDL_GLContextState*
-    subq $MAIN_STACK, %rsp # 0() window, 8() glContext, 16() padding; rsp initially is not 16-aligned so we need to add extra 8 -> 16 + 8 = 24
+    MAIN_STACK = 72 # // SDL_Window* + SDL_GLContextState* | 16 real stack + 6 * 8 = space for nonvolatile registers to backup their values + 8 alignment
+    subq $MAIN_STACK, %rsp # 0() window, 8() glContext, 16() registers backup; rsp initially is not 16-aligned so we need to add extra 8 -> 16 + 8 = 24
+
+    # no frame pointers needed
+
+    # backing up all non volatile registers
+    movq %rbx, 16(%rsp)
+    movq %rbp, 24(%rsp)
+    movq %r12, 32(%rsp)
+    movq %r13, 40(%rsp)
+    movq %r14, 48(%rsp)
+    movq %r15, 56(%rsp)
+    # no here in this code consider them as additional volatile ones ;)
+    xorq %rbx, %rbx
+    xorq %rbp, %rbp
+    xorq %r12, %r12
+    xorq %r13, %r13
+    xorq %r14, %r14
+    xorq %r15, %r15
+
+    //
 
     leaq SDL_HINT_VIDEO_DRIVER(%rip), %rdi
     leaq VIDEO_DRIVERS(%rip), %rsi
@@ -1657,6 +1683,13 @@ main:
     callxt SDL_Quit
 
     //
+
+    movq 16(%rsp), %rbx
+    movq 24(%rsp), %rbp
+    movq 32(%rsp), %r12
+    movq 40(%rsp), %r13
+    movq 48(%rsp), %r14
+    movq 56(%rsp), %r15
 
     xorl %eax, %eax # return 0
     addq $MAIN_STACK, %rsp
