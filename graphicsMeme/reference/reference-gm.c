@@ -3,18 +3,18 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
-//     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
-//     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing 
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
+//     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
+//     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing
 //     effects, result saving to file with image container encoding.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated July 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// mkdir build && (cd build; cmake -G Ninja .. && cd .. && cmake --build build -j 18) 
+// mkdir build && (cd build; cmake -G Ninja .. && cd .. && cmake --build build -j 18)
 // cmake --build build -j 18
 
 // vulkan-tools glslang for glsl to spirv compilation
@@ -22,6 +22,8 @@
 // glslangValidator -G texquad.frag -o texquad.frag.spv
 // glslangValidator -G line.vert -o line.vert.spv
 // glslangValidator -G line.frag -o line.frag.spv
+
+// Glew isn't needed in assembly and thus it's not used there at all
 
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
@@ -34,7 +36,7 @@
 
 typedef unsigned char byte;
 
-typedef enum : byte {TYPE_TEXQUAD, TYPE_LINE} Type;
+typedef enum : int {TYPE_TEXQUAD, TYPE_LINE} Type;
 
 typedef struct {
     Type type;
@@ -43,14 +45,14 @@ typedef struct {
 
 typedef struct {
     Object;
-    GLfloat x, y;
+    GLuint x, y;
     GLuint w, h, vbo, ebo, texture;
     bool clip;
 } Texquad;
 
 typedef struct {
     Object;
-    GLfloat x0, y0, x1, y1, width;
+    GLuint x0, y0, x1, y1, width;
 } Line;
 
 typedef struct {
@@ -62,128 +64,128 @@ static constexpr unsigned WIDTH = 640, HEIGHT = 640, UPDATE_PERIOD = 16, OBJECTS
 static const char* const FONT = "font.ttf", * const OUTPUT_IMAGE = "gmout.png";
 
 /*
-#version 460 core
-
-layout(location = 0) in vec4 iVertex;
-layout(location = 0) out vec2 oTexCoord;
-
-layout(std140, binding = 0) uniform Common {
-    mat4 projection;
-};
-
-layout(location = 0) uniform mat4 uModel;
-
-void main() {
-    gl_Position = projection * uModel * vec4(iVertex.xy, 0, 1);
-    oTexCoord = iVertex.zw;
-}
+ * #version 460 core
+ *
+ * layout(location = 0) in vec4 iVertex;
+ * layout(location = 0) out vec2 oTexCoord;
+ *
+ * layout(std140, binding = 0) uniform Common {
+ *    mat4 projection;
+ * };
+ *
+ * layout(location = 0) uniform mat4 uModel;
+ *
+ * void main() {
+ *    gl_Position = projection * uModel * vec4(iVertex.xy, 0, 1);
+ *    oTexCoord = iVertex.zw;
+ * }
  */
 static const byte TEXQUAD_VERTEX_SHADER[] = {
     #embed "texquad.vert.spv"
 };
 /*
-#version 460 core
-
-layout(location = 0) in vec2 iTexCoord;
-
-layout(location = 0) out vec4 oColor;
-
-layout(location = 1) uniform sampler2D uTexture;
-layout(location = 2) uniform bool uPostprocessing;
-layout(location = 3) uniform vec4 uClip;
-
-vec4 postprocessing() {
-    const float offset = 1.0 / 300.0;
-
-    const float kernel[9] = float[](
-        0, 1, 0,
-        1, -4, 1,
-        0, 1, 0
-    );
-
-    float sign[3] = float[](-offset, 0, offset);
-    vec3 tex[9];
-    for (int i = 0, j = 0, k = 0; i < 9; i++) {
-        tex[i] = vec3(texture(uTexture, iTexCoord + vec2(sign[j], sign[k])));
-        if (++j == 3 && ++k == 3) k = 0;
-        if (j == 3) j = 0;
-    }
-
-    vec3 color = vec3(0);
-    for (int i = 0; i < 9; i++)
-        color += tex[i] * kernel[i];
-
-    return vec4(color, 1);
-}
-
-void main() {
-    const vec4 texColor = uPostprocessing ? postprocessing() : texture(uTexture, iTexCoord);
-    float alpha;
-
-    if (uClip == vec4(0)) {
-        alpha = smoothstep(0.2, 0.8, texColor.a);
-        if (alpha < 0.02) discard;
-    } else {
-        const vec2 center = uClip.xy;
-        const vec2 radii = uClip.zw;
-        const vec2 diff = gl_FragCoord.xy - center;
-
-        const float dist = (diff.x * diff.x) / (radii.x * radii.x) +
-            (diff.y * diff.y) / (radii.y * radii.y);
-
-        alpha = 1 - smoothstep(0.95, 1, dist);
-        if (alpha <= 0) discard;
-        alpha *= texColor.a;
-    }
-
-    oColor = vec4(texColor.rgb, alpha);
-}
+ * #version 460 core
+ *
+ * layout(location = 0) in vec2 iTexCoord;
+ *
+ * layout(location = 0) out vec4 oColor;
+ *
+ * layout(location = 1) uniform sampler2D uTexture;
+ * layout(location = 2) uniform bool uPostprocessing;
+ * layout(location = 3) uniform vec4 uClip;
+ *
+ * vec4 postprocessing() {
+ *    const float offset = 1.0 / 300.0;
+ *
+ *    const float kernel[9] = float[](
+ *        0, 1, 0,
+ *        1, -4, 1,
+ *        0, 1, 0
+ *    );
+ *
+ *    float sign[3] = float[](-offset, 0, offset);
+ *    vec3 tex[9];
+ *    for (int i = 0, j = 0, k = 0; i < 9; i++) {
+ *        tex[i] = vec3(texture(uTexture, iTexCoord + vec2(sign[j], sign[k])));
+ *        if (++j == 3 && ++k == 3) k = 0;
+ *        if (j == 3) j = 0;
+ *    }
+ *
+ *    vec3 color = vec3(0);
+ *    for (int i = 0; i < 9; i++)
+ *        color += tex[i] * kernel[i];
+ *
+ *    return vec4(color, 1);
+ * }
+ *
+ * void main() {
+ *    const vec4 texColor = uPostprocessing ? postprocessing() : texture(uTexture, iTexCoord);
+ *    float alpha;
+ *
+ *    if (uClip == vec4(0)) {
+ *        alpha = smoothstep(0.2, 0.8, texColor.a);
+ *        if (alpha < 0.02) discard;
+ *    } else {
+ *        const vec2 center = uClip.xy;
+ *        const vec2 radii = uClip.zw;
+ *        const vec2 diff = gl_FragCoord.xy - center;
+ *
+ *        const float dist = (diff.x * diff.x) / (radii.x * radii.x) +
+ *            (diff.y * diff.y) / (radii.y * radii.y);
+ *
+ *        alpha = 1 - smoothstep(0.95, 1, dist);
+ *        if (alpha <= 0) discard;
+ *        alpha *= texColor.a;
+ *    }
+ *
+ *    oColor = vec4(texColor.rgb, alpha);
+ * }
  */
 static const byte TEXQUAD_FRAGMENT_SHADER[] = {
     #embed "texquad.frag.spv"
 };
 
 /*
-#version 460 core
-
-layout(std140, binding = 0) uniform Common {
-    mat4 projection;
-};
-
-layout(location = 0) uniform vec4 uCoords;
-layout(location = 1) uniform float uThickness;
-
-void main() {
-    const vec3 p0 = vec3(uCoords.xy, 0);
-    const vec3 p1 = vec3(uCoords.zw, 0);
-
-    vec3 perpendicular = cross(normalize(p1 - p0), vec3(0, 0, 1));
-    perpendicular = normalize(perpendicular) * uThickness / 2;
-
-    const vec3 points[] = vec3[](
-        p0 + perpendicular,
-        p0 - perpendicular,
-        p1 + perpendicular,
-        p1 - perpendicular
-    );
-
-    const int index = gl_VertexID - ((gl_VertexID < 4) ? 0 : 3);
-    gl_Position = projection * vec4(points[index].xy, 0, 1);
-}
+ * #version 460 core
+ *
+ * layout(std140, binding = 0) uniform Common {
+ *    mat4 projection;
+ * };
+ *
+ * layout(location = 0) uniform vec4 uCoords;
+ * layout(location = 1) uniform float uThickness;
+ *
+ * void main() {
+ *    const vec3 p0 = vec3(uCoords.xy, 0);
+ *    const vec3 p1 = vec3(uCoords.zw, 0);
+ *
+ *    vec3 perpendicular = cross(normalize(p1 - p0), vec3(0, 0, 1));
+ *    perpendicular = normalize(perpendicular) * uThickness / 2;
+ *
+ *    const vec3 points[] = vec3[](
+ *        p0 + perpendicular,
+ *        p0 - perpendicular,
+ *        p1 + perpendicular,
+ *        p1 - perpendicular
+ *    );
+ *
+ *    const int index = gl_VertexID - ((gl_VertexID < 4) ? 0 : 3);
+ *    gl_Position = projection * vec4(points[index].xy, 0, 1);
+ * }
  */
 static const byte LINE_VERTEX_SHADER[] = {
     #embed "line.vert.spv"
 };
 /*
-#version 460 core
-
-layout(location = 0) out vec4 oColor;
-
-layout(location = 2) uniform vec4 uColor;
-
-void main() {
-    oColor = uColor;
-}
+ * #version 460 core
+ *
+ * layout(location = 0) out vec4 oColor;
+ *
+ * layout(location = 2) uniform vec4 uColor;
+ *
+ * void main() {
+ *    oColor = uColor;
+ * }
  */
 static const byte LINE_FRAGMENT_SHADER[] = {
     #embed "line.frag.spv"
@@ -235,8 +237,8 @@ static void bootstrapQuad(
 }
 
 static GLuint makeShaders(
-    const unsigned vertexSize, 
-    const byte vertex[const restrict vertexSize], 
+    const unsigned vertexSize,
+    const byte vertex[const restrict vertexSize],
     const unsigned fragmentSize,
     const byte fragment[const restrict fragmentSize]
 ) {
@@ -291,11 +293,17 @@ static void createTexquad(Texquad* const restrict texquad, SDL_Surface* const re
         SDL_DestroySurface(surface);
     }
 
+    const GLfloat
+    x = (float) texquad->x,
+    y = (float) texquad->y,
+    w = (float) texquad->w,
+    h = (float) texquad->h;
+
     const GLfloat vertices[] = {
-        texquad->x + (float) texquad->w, texquad->y + (float) texquad->h, 1, 1,
-        texquad->x + (float) texquad->w, texquad->y,                      1, 0,
-        texquad->x,                      texquad->y,                      0, 0,
-        texquad->x,                      texquad->y + (float) texquad->h, 0, 1
+        x + w, y + h, 1.f, 1.f,
+        x + w, y,     1.f, 0.f,
+        x,     y,     0.f, 0.f,
+        x,     y + h, 0.f, 1.f
     };
     bootstrapQuad(&texquad->vao, &texquad->vbo, &texquad->ebo, sizeof(vertices), vertices);
     glVertexArrayVertexBuffer(texquad->vao, 0, texquad->vbo, 0, 4 * sizeof(float));
@@ -306,13 +314,13 @@ static void createTexquad(Texquad* const restrict texquad, SDL_Surface* const re
 
     texquad->program = makeShaders(sizeof(TEXQUAD_VERTEX_SHADER), TEXQUAD_VERTEX_SHADER, sizeof(TEXQUAD_FRAGMENT_SHADER), TEXQUAD_FRAGMENT_SHADER);
 
-    const float wHalf = (float) texquad->w / 2.f;
-    const float hHalf = (float) texquad->h / 2.f;
+    const float wHalf = w / 2.f;
+    const float hHalf = h / 2.f;
     glProgramUniform4fv(
         texquad->program,
         3, // uClip
         1,
-        !texquad->clip ? (vec4) {0} : (vec4) {texquad->x + wHalf, texquad->y + hHalf, wHalf, hHalf}
+        !texquad->clip ? (vec4) {0.f} : (vec4) {x + wHalf, y + hHalf, wHalf, hHalf}
     );
 
     glProgramUniformMatrix4fv(texquad->program, 0 /*uModel*/, 1, GL_FALSE, (void*) model);
@@ -320,8 +328,8 @@ static void createTexquad(Texquad* const restrict texquad, SDL_Surface* const re
 
 static SDL_Surface* createTexture(const char* const imgPathOrText, const bool imageOrText) {
     SDL_Surface* const temp = imageOrText
-        ? IMG_Load(imgPathOrText)
-        : TTF_RenderText_Blended(gFont, imgPathOrText, 0, (SDL_Color) {127, 127, 127, 255});
+    ? IMG_Load(imgPathOrText)
+    : TTF_RenderText_Blended(gFont, imgPathOrText, 0, (SDL_Color) {127, 127, 127, 255}); // TODO: extract color to a constant
     assert(temp);
 
     SDL_Surface* const surface = SDL_ConvertSurface(temp, SDL_PIXELFORMAT_RGBA32);
@@ -357,9 +365,9 @@ static void createLine(Line* const line) {
 
     line->program = makeShaders(sizeof(LINE_VERTEX_SHADER), LINE_VERTEX_SHADER, sizeof(LINE_FRAGMENT_SHADER), LINE_FRAGMENT_SHADER);
 
-    glProgramUniform4fv(line->program, 0 /*uCoords*/, 1, (vec4) {line->x0, line->y0, line->x1, line->y1});
-    glProgramUniform1f(line->program, 1 /*uThickness*/, line->width);
-    glProgramUniform4fv(line->program, 2 /*uColor*/, 1, (vec4) {0, 1, 0, 1});
+    glProgramUniform4fv(line->program, 0 /*uCoords*/, 1, (vec4) {(float) line->x0, (float) line->y0, (float) line->x1, (float) line->y1});
+    glProgramUniform1f(line->program, 1 /*uThickness*/, (float) line->width);
+    glProgramUniform4fv(line->program, 2 /*uColor*/, 1, (vec4) {0.f, 1.f, 0.f, 1.f});
 }
 
 static void renderLine(const Line* const line) {
