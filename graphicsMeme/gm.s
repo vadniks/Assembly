@@ -11,7 +11,7 @@
 //     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing 
 //     effects, result saving to file with image container encoding.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
-// Version: dated July 2026
+// Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
 // gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -mbmi -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
@@ -116,14 +116,15 @@ variable gMaxAnisotropy 4 # // float
 # typedef struct {
 #     Type type;
 #     GLuint vao, program;
-#     <int padding>;
-# } Object; // size = 4 * 3 + 4 padding = 16
+#     int color; // rgba bytes
+# } Object; // size = 4 * 4 = 16
 variable gObjects 48 # // <Object*>; 16 * 3
 
 OBJECT_SIZE = 16
 OBJECT_TYPE_OFFSET = 0
 OBJECT_VAO_OFFSET = 4
 OBJECT_PROGRAM_OFFSET = 8
+OBJECT_COLOR_OFFSET = 12
 
 // -----------------------------------> TODO: replace sse with avx or vex-sse
 
@@ -714,22 +715,22 @@ createTexquad: # receivex Texquad*, SDL_Surface* nullable, const mat4 model - po
     ret
 
 function createTexture
-createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageOrText
+createTexture: # return SDL_Surface*; receives: char* imgPathOrText, int color - if color is zero then it's an image, otherwise it's a text
     endbr64
 
     CREATE_TEXTURE_STACK = 40
     subq $CREATE_TEXTURE_STACK, %rsp # 3 * 8 void* + 4 int + 12 padding for stack alignment
-    # 0() imgPathOrText, 8() imageOrText, 12() SDL_Surface* temp, 20() SDL_Surface* converted
+    # 0() imgPathOrText, 8() color, 12() SDL_Surface* temp, 20() SDL_Surface* converted
 
     movq %rdi, (%rsp) # * imgPathOrText
-    movl %esi, 8(%rsp) # bool/int imageOrText
+    movl %esi, 8(%rsp) # color
     movq $0, 12(%rsp) # * temp
     movq $0, 20(%rsp) # * converted
 
     //
 
-    testl %esi, %esi # if imageOrText
-    jz .LcreateTexture.text
+    testl %esi, %esi # if not color = color is zero
+    jnz .LcreateTexture.text
     #movq %rdi, %rdi # imgPathOrText
     callxt IMG_Load
     jmp .LcreateTexture.endCondition
@@ -737,7 +738,8 @@ createTexture: # return SDL_Surface*; receives: char* imgPathOrText, bool imageO
     movq gFont(%rip), %rdi
     movq (%rsp), %rsi # imgPathOrText
     xorq %rdx, %rdx
-    movl $0xff7f7f7f, %ecx # (SDL_Color) {127, 127, 127, 255}
+    movl 8(%rsp), %ecx # color
+    bswap %ecx # // convert to little endian
     callxt TTF_RenderText_Blended
 .LcreateTexture.endCondition:
     movq %rax, 12(%rsp) # temp surface
@@ -884,12 +886,12 @@ createLine: # receives Line*
     cvtsi2ss %edx, %xmm0
     callxt glProgramUniform1f
 
+    movq 16(%rsp), %rdi # Line*
     # xmm0 = {0.f, 1.f, 0.f, 1.f}
     # vector = xmm0, aligned
-    xorps %xmm0, %xmm0 # xmm0 = 0
-    insertps $0b00010000, FLOATS+0(%rip), %xmm0 # src: 0, dst: 1, zeroout: false; xmm0[1] = 1.f
-    insertps $0b00110000, FLOATS+0(%rip), %xmm0 # src: 0, dst: 3, zeroout: false; xmm0[3] = 1.f
-    movaps %xmm0, (%rsp) # vector = xmm0
+    movl OBJECT_COLOR_OFFSET(%rdi), %edi # line->color
+    call convertColor
+    movaps %xmm0, (%rsp) # vector = result = xmm0 = converted color
 
     movq 16(%rsp), %rdi # Line*
     movl OBJECT_PROGRAM_OFFSET(%rdi), %edi # line->program
@@ -1035,8 +1037,6 @@ render:
     //
 
     movl $0xffffffff, %edi
-    # movl $0xf44336ff, %edi
-    # movl $0x3f51b5ff, %edi
     call clearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
@@ -1317,7 +1317,7 @@ createObjects:
     //
 
     leaq TEST_STR(%rip), %rdi
-    xorl %esi, %esi # false
+    movl $0x7f7f7fff, %esi # rgb bytes
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
 
@@ -1345,7 +1345,7 @@ createObjects:
     //
 
     leaq IMAGE_NAME(%rip), %rdi
-    movl $1, %esi # true
+    xorl %esi, %esi # color = 0 -> image
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
 
@@ -1376,6 +1376,7 @@ createObjects:
 
     movq 16+gObjects(%rip), %rax # gObjects[2] = Line*
     movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
+    movl $0x00ff00ff, OBJECT_COLOR_OFFSET(%rax) # rgba
     movl $500, LINE_X0_OFFSET(%rax)
     movl $100, LINE_Y0_OFFSET(%rax)
     movl $600, LINE_X1_OFFSET(%rax)
@@ -1418,8 +1419,8 @@ removeObjects:
     addq $8, %rsp # stack alignment
     ret
 
-function clearColor # // TODO: add support for transluent/semi-transparent objects (watermarks)
-clearColor: # receives int (longword) rgba color bytes
+function convertColor
+convertColor: # receives int (longword) rgba color bytes; returns vector of 4 converted normilized color's channels floats inside xmm0
     endbr64
     subq $8, %rsp
 
@@ -1437,16 +1438,28 @@ clearColor: # receives int (longword) rgba color bytes
     movl $0b0000100000011000, %r8d # length: 8 (00001000), start: 24 (00011000), 4th byte
     bextrl %r8d, %eax, %ecx
 
-    pinsrd $0, %edi, %xmm4
-    pinsrd $1, %esi, %xmm4
-    pinsrd $2, %edx, %xmm4
-    pinsrd $3, %ecx, %xmm4
-    cvtdq2ps %xmm4, %xmm4 # convert each longword to packed spfp
+    pinsrd $0, %edi, %xmm0
+    pinsrd $1, %esi, %xmm0
+    pinsrd $2, %edx, %xmm0
+    pinsrd $3, %ecx, %xmm0
+    cvtdq2ps %xmm0, %xmm0 # convert each longword to packed spfp
 
     movl $0x437f0000, %eax # 255.f
-    pinsrd $0, %eax, %xmm5 # xmm5[0] = eax
-    shufps $0x00, %xmm5, %xmm5 # broacast/copy xmm5[0] to all elements of xmm5 (0-4)
-    divps %xmm5, %xmm4 # xmm4 = xmm4 / xmm5 = each_byte / 0xff to map from 0-255 to normilized color values 0.0f-0.1f
+    pinsrd $0, %eax, %xmm1 # xmm1[0] = eax
+    shufps $0, %xmm1, %xmm1 # broacast/copy xmm1[0] to all elements of xmm1 (0-4)
+    divps %xmm1, %xmm0 # xmm0 = xmm0 / xmm1 = each_byte / 0xff to map from 0-255 to normilized color values 0.0f-0.1f
+
+    addq $8, %rsp
+    ret
+
+function clearColor
+clearColor: # receives int (longword) rgba color bytes
+    endbr64
+    subq $8, %rsp
+
+    # movl %edi, %edi # color
+    call convertColor
+    movaps %xmm0, %xmm4 # color vector
 
     insertps $0b00001110, %xmm4, %xmm0 # src: 0, dst: 0, zeroout: 1_2_3; xmm0[0] = xmm4[0]
     insertps $0b01001110, %xmm4, %xmm1 # src: 1, dst: 0, zeroout: 1_2_3; xmm1[0] = xmm4[1]
@@ -1560,7 +1573,7 @@ main:
     movq %r13, 40(%rsp)
     movq %r14, 48(%rsp)
     movq %r15, 56(%rsp)
-    # no here in this code consider them as additional volatile ones ;)
+    # now, here in this code, consider them as additional volatile ones ;)
     xorq %rbx, %rbx
     xorq %rbp, %rbp
     xorq %r12, %r12
