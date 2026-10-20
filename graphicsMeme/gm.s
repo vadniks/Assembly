@@ -3,18 +3,18 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
-//     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
-//     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing 
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
+//     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
+//     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing
 //     effects, result saving to file with image container encoding.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
 // glslangValidator -G texquad.frag -o texquad.frag.spv
@@ -24,10 +24,10 @@
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
 
-WIDTH = 640
-HEIGHT = 640
+WIDTH = 1024
+HEIGHT = 500
 UPDATE_PERIOD = 16
-OBJECTS = 3
+OBJECTS = 5
 
 # rgba bytes (little endian in binary, big endian in code, assembler/compiler converts them automatically)
 COLOR_BACKGROUND = 0xffffffff
@@ -41,7 +41,7 @@ DEBUG_D = 0x0a6425 # // %d\n
 DEBUG_F = 0x0a6625 # // %f\n
 DEBUG_A = 0x0a61 # // a\n
 DEBUG_B = 0x0a62 # // b\n
-TEST_STR = 0x0a54534554 # // TEST\n
+# TEST_STR = 0x0a54534554 # // TEST\n
 
 .macro constant n # // name
     .align 16
@@ -77,11 +77,14 @@ UNIFORM_MODEL: .asciz "uModel"
 constant ENTRY_POINT
 ENTRY_POINT: .asciz "main"
 
-constant TEST_STR
-TEST_STR: .asciz "TEST"
+constant TEXT1
+TEXT1: .asciz "Ya know, I'm smth of a psychologist myself!"
+
+constant TEXT2
+TEXT2: .asciz "WHEN AN ENGINEER TREATS EVERYONE AS ABSTRACT VULNERABLE SYSTEMS"
 
 constant IMAGE_NAME
-IMAGE_NAME: .asciz "img.png"
+IMAGE_NAME: .asciz "dedrsfa.jpg"
 
 constant TEXQUAD_VERTEX
 TEXQUAD_VERTEX: .incbin "texquad.vert.spv"
@@ -284,7 +287,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-    
+
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -331,7 +334,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-    
+
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1335,10 +1338,10 @@ createObjects:
 
     movq 0+gObjects(%rip), %rax # gObjects[0] = Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $50, TEXQUAD_X_OFFSET(%rax)
-    movl $50, TEXQUAD_Y_OFFSET(%rax)
-    movl $320, TEXQUAD_W_OFFSET(%rax)
-    movl $320, TEXQUAD_H_OFFSET(%rax)
+    movl $0, TEXQUAD_X_OFFSET(%rax)
+    movl $0, TEXQUAD_Y_OFFSET(%rax)
+    movl $WIDTH, TEXQUAD_W_OFFSET(%rax)
+    movl $HEIGHT, TEXQUAD_H_OFFSET(%rax)
     movl $1, TEXQUAD_CLIP_OFFSET(%rax)
 
     movq %rax, %rdi # gObjects[0]
@@ -1357,18 +1360,18 @@ createObjects:
     movq 8+gObjects(%rip), %rax # gObjects[1] = Line*
     movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
     movl $COLOR_LINE, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
-    movl $210, LINE_X0_OFFSET(%rax)
-    movl $470, LINE_Y0_OFFSET(%rax)
-    movl $630, LINE_X1_OFFSET(%rax)
-    movl $470, LINE_Y1_OFFSET(%rax)
-    movl $190, LINE_WIDTH_OFFSET(%rax)
+    movl $5, LINE_X0_OFFSET(%rax)
+    movl $45, LINE_Y0_OFFSET(%rax)
+    movl $WIDTH-5, LINE_X1_OFFSET(%rax)
+    movl $45, LINE_Y1_OFFSET(%rax)
+    movl $75, LINE_WIDTH_OFFSET(%rax)
 
     movq %rax, %rdi
     call createLine
 
     //
 
-    leaq TEST_STR(%rip), %rdi
+    leaq TEXT1(%rip), %rdi
     movl $COLOR_TEXT, %esi # rgb bytes
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
@@ -1381,12 +1384,60 @@ createObjects:
 
     movq 16+gObjects(%rip), %rax # Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $210, TEXQUAD_X_OFFSET(%rax)
-    movl $310, TEXQUAD_Y_OFFSET(%rax)
-    movl $420, TEXQUAD_W_OFFSET(%rax)
-    movl $320, TEXQUAD_H_OFFSET(%rax)
+    movl $10, TEXQUAD_X_OFFSET(%rax)
+    movl $-5, TEXQUAD_Y_OFFSET(%rax)
+    movl $WIDTH-20, TEXQUAD_W_OFFSET(%rax)
+    movl $100, TEXQUAD_H_OFFSET(%rax)
 
     movq %rax, %rdi # gObjects[2]
+    movq (%rsp), %rsi # SDL_Surface*, no longer needed
+    leaq 16(%rsp), %rdx # &model
+    call createTexquad
+
+    leaq 16(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+
+    //
+
+    movl $LINE_SIZE, %edi # sizeof(Line)
+    movl $1, %esi
+    callxt calloc
+    movq %rax, 24+gObjects(%rip) # gObjects[3] = Line*
+    assert
+
+    movq 24+gObjects(%rip), %rax # gObjects[3] = Line*
+    movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
+    movl $COLOR_LINE, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
+    movl $5, LINE_X0_OFFSET(%rax)
+    movl $460, LINE_Y0_OFFSET(%rax)
+    movl $WIDTH-5, LINE_X1_OFFSET(%rax)
+    movl $460, LINE_Y1_OFFSET(%rax)
+    movl $75, LINE_WIDTH_OFFSET(%rax)
+
+    movq %rax, %rdi
+    call createLine
+
+    //
+
+    leaq TEXT2(%rip), %rdi
+    movl $COLOR_TEXT, %esi # rgb bytes
+    call createTexture
+    movq %rax, (%rsp) # SDL_Surface*
+
+    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
+    movl $1, %esi
+    callxt calloc
+    movq %rax, 32+gObjects(%rip) # gObjects[4] = Texquad*
+    assert
+
+    movq 32+gObjects(%rip), %rax # Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
+    movl $10, TEXQUAD_X_OFFSET(%rax)
+    movl $410, TEXQUAD_Y_OFFSET(%rax)
+    movl $WIDTH-20, TEXQUAD_W_OFFSET(%rax)
+    movl $100, TEXQUAD_H_OFFSET(%rax)
+
+    movq %rax, %rdi # gObjects[4]
     movq (%rsp), %rsi # SDL_Surface*, no longer needed
     leaq 16(%rsp), %rdx # &model
     call createTexquad
@@ -1613,10 +1664,10 @@ main:
     assert
 
     movq gFont(%rip), %rdi
-    movl $0x42f00000, %eax # 120.f
-    movd %eax, %xmm0
-    movl $100, %esi
-    movl $100, %edx
+    movl $50, %eax
+    cvtsi2ss %eax, %xmm0
+    movl $50, %esi
+    movl $50, %edx
     callxt TTF_SetFontSizeDPI
     assert
 
