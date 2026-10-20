@@ -14,7 +14,7 @@
 // Version: dated July 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+// gcc -s -pie -fpie -fomit-frame-pointer -fno-plt -mbmi -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
 // glslangValidator -G texquad.frag -o texquad.frag.spv
@@ -50,8 +50,8 @@ SDL_HINT_VIDEO_DRIVER: .asciz "SDL_VIDEO_DRIVER"
 constant VIDEO_DRIVERS
 VIDEO_DRIVERS: .asciz "wayland,x11"
 
-constant EMPTY_STR
-EMPTY_STR: .zero 1
+constant WINDOW_NAME
+WINDOW_NAME: .asciz "Memes factory"
 
 constant FONT
 FONT: .asciz "font.ttf"
@@ -214,7 +214,7 @@ variable gPostprocessingTexquad TEXQUAD_SIZE # // Texquad
     jnz 1f
     ud2
 1:
-    nop
+    xchgb %al, %al # aka nop
 .endm
 
 function captureCanvas
@@ -1034,11 +1034,10 @@ render:
 
     //
 
-    movss FLOATS+0(%rip), %xmm0 # 1.f
-    movss FLOATS+0(%rip), %xmm1 # 1.f
-    movss FLOATS+0(%rip), %xmm2 # 1.f
-    movss FLOATS+0(%rip), %xmm3 # 1.f
-    callxt glClearColor
+    movl $0xffffffff, %edi
+    # movl $0xf44336ff, %edi
+    # movl $0x3f51b5ff, %edi
+    call clearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
     callxt glClear
@@ -1419,6 +1418,45 @@ removeObjects:
     addq $8, %rsp # stack alignment
     ret
 
+function clearColor # // TODO: add support for transluent/semi-transparent objects (watermarks)
+clearColor: # receives int (longword) rgba color bytes
+    endbr64
+    subq $8, %rsp
+
+    movl %edi, %eax # rgba color (little endian)
+    bswap %eax # // convert to big endian
+
+    # Bit Manipulation Instruction Set 1 (BMI) x86-64 extension
+    #       ----====----====
+    movl $0b0000100000000000, %r8d # length: 8 (00001000), start: 1 (00000001), 1st byte
+    bextrl %r8d, %eax, %edi
+    movl $0b0000100000001000, %r8d # length: 8 (00001000), start: 8 (00001000), 2nd byte
+    bextrl %r8d, %eax, %esi
+    movl $0b0000100000010000, %r8d # length: 8 (00001000), start: 16 (00010000), 3rd byte
+    bextrl %r8d, %eax, %edx
+    movl $0b0000100000011000, %r8d # length: 8 (00001000), start: 24 (00011000), 4th byte
+    bextrl %r8d, %eax, %ecx
+
+    pinsrd $0, %edi, %xmm4
+    pinsrd $1, %esi, %xmm4
+    pinsrd $2, %edx, %xmm4
+    pinsrd $3, %ecx, %xmm4
+    cvtdq2ps %xmm4, %xmm4 # convert each longword to packed spfp
+
+    movl $0x437f0000, %eax # 255.f
+    pinsrd $0, %eax, %xmm5 # xmm5[0] = eax
+    shufps $0x00, %xmm5, %xmm5 # broacast/copy xmm5[0] to all elements of xmm5 (0-4)
+    divps %xmm5, %xmm4 # xmm4 = xmm4 / xmm5 = each_byte / 0xff to map from 0-255 to normilized color values 0.0f-0.1f
+
+    insertps $0b00001110, %xmm4, %xmm0 # src: 0, dst: 0, zeroout: 1_2_3; xmm0[0] = xmm4[0]
+    insertps $0b01001110, %xmm4, %xmm1 # src: 1, dst: 0, zeroout: 1_2_3; xmm1[0] = xmm4[1]
+    insertps $0b10001110, %xmm4, %xmm2 # src: 2, dst: 0, zeroout: 1_2_3; xmm2[0] = xmm4[2]
+    insertps $0b11001110, %xmm4, %xmm3 # src: 3, dst: 0, zeroout: 1_2_3; xmm3[0] = xmm4[3]
+    callxt glClearColor
+
+    addq $8, %rsp
+    ret
+
 function loop
 loop: # receives SDL_Window*
     endbr64
@@ -1440,12 +1478,8 @@ loop: # receives SDL_Window*
 
     //
 
-    # movl $0x3f80000, %eax # IEEE-754 floating point hex representation (little endian) = 1.f
-    movss FLOATS+0(%rip), %xmm0
-    movss FLOATS+0(%rip), %xmm1
-    movss FLOATS+0(%rip), %xmm2
-    movss FLOATS+0(%rip), %xmm3
-    callxt glClearColor
+    movl $0xffffffff, %edi
+    call clearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
     callxt glClear
@@ -1598,7 +1632,7 @@ main:
 
     //
 
-    leaq EMPTY_STR(%rip), %rdi
+    leaq WINDOW_NAME(%rip), %rdi
     movl $WIDTH, %esi
     movl $HEIGHT, %edx
     movl $2, %ecx # SDL_WINDOW_OPENGL
