@@ -29,6 +29,11 @@ HEIGHT = 640
 UPDATE_PERIOD = 16
 OBJECTS = 3
 
+# rgba bytes (little endian in binary, big endian in code, assembler/compiler converts them automatically)
+COLOR_BACKGROUND = 0xffffffff
+COLOR_TEXT = 0xffffffff
+COLOR_LINE = 0x000000ff
+
 # little endian
 DEBUG_S = 0x0a7325 # // %s\n
 DEBUG_P = 0x0a7025 # // %p\n
@@ -1036,7 +1041,7 @@ render:
 
     //
 
-    movl $0xffffffff, %edi
+    movl $COLOR_BACKGROUND, %edi
     call clearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
@@ -1316,8 +1321,8 @@ createObjects:
 
     //
 
-    leaq TEST_STR(%rip), %rdi
-    movl $0x7f7f7fff, %esi # rgb bytes
+    leaq IMAGE_NAME(%rip), %rdi
+    xorl %esi, %esi # color = 0 -> image
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
 
@@ -1327,35 +1332,7 @@ createObjects:
     movq %rax, 0+gObjects(%rip) # gObjects[0] = Texquad*
     assert
 
-    movq 0+gObjects(%rip), %rax # Texquad*
-    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $210, TEXQUAD_X_OFFSET(%rax)
-    movl $310, TEXQUAD_Y_OFFSET(%rax)
-    movl $420, TEXQUAD_W_OFFSET(%rax)
-    movl $320, TEXQUAD_H_OFFSET(%rax)
-
-    movq %rax, %rdi # gObjects[0]
-    movq (%rsp), %rsi # SDL_Surface*, no longer needed
-    leaq 16(%rsp), %rdx # &model
-    call createTexquad
-
-    leaq 16(%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-
-    //
-
-    leaq IMAGE_NAME(%rip), %rdi
-    xorl %esi, %esi # color = 0 -> image
-    call createTexture
-    movq %rax, (%rsp) # SDL_Surface*
-
-    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
-    movl $1, %esi
-    callxt calloc
-    movq %rax, 8+gObjects(%rip) # gObjects[1] = Texquad*
-    assert
-
-    movq 8+gObjects(%rip), %rax # gObjects[1] = Texquad*
+    movq 0+gObjects(%rip), %rax # gObjects[0] = Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
     movl $50, TEXQUAD_X_OFFSET(%rax)
     movl $50, TEXQUAD_Y_OFFSET(%rax)
@@ -1363,28 +1340,58 @@ createObjects:
     movl $320, TEXQUAD_H_OFFSET(%rax)
     movl $1, TEXQUAD_CLIP_OFFSET(%rax)
 
-    movq %rax, %rdi # gObjects[1]
-    movq (%rsp), %rsi # SDL_Surface*
+    movq %rax, %rdi # gObjects[0]
+    movq (%rsp), %rsi # SDL_Surface*, no longer needed
     leaq 16(%rsp), %rdx # &model
     call createTexquad
+
+    //
 
     movl $LINE_SIZE, %edi # sizeof(Line)
     movl $1, %esi
     callxt calloc
-    movq %rax, 16+gObjects(%rip) # gObjects[2] = Line*
+    movq %rax, 8+gObjects(%rip) # gObjects[1] = Line*
     assert
 
-    movq 16+gObjects(%rip), %rax # gObjects[2] = Line*
+    movq 8+gObjects(%rip), %rax # gObjects[1] = Line*
     movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
-    movl $0x00ff00ff, OBJECT_COLOR_OFFSET(%rax) # rgba
-    movl $500, LINE_X0_OFFSET(%rax)
-    movl $100, LINE_Y0_OFFSET(%rax)
-    movl $600, LINE_X1_OFFSET(%rax)
-    movl $100, LINE_Y1_OFFSET(%rax)
-    movl $10, LINE_WIDTH_OFFSET(%rax)
+    movl $COLOR_LINE, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
+    movl $210, LINE_X0_OFFSET(%rax)
+    movl $470, LINE_Y0_OFFSET(%rax)
+    movl $630, LINE_X1_OFFSET(%rax)
+    movl $470, LINE_Y1_OFFSET(%rax)
+    movl $190, LINE_WIDTH_OFFSET(%rax)
 
     movq %rax, %rdi
     call createLine
+
+    //
+
+    leaq TEST_STR(%rip), %rdi
+    movl $COLOR_TEXT, %esi # rgb bytes
+    call createTexture
+    movq %rax, (%rsp) # SDL_Surface*
+
+    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
+    movl $1, %esi
+    callxt calloc
+    movq %rax, 16+gObjects(%rip) # gObjects[2] = Texquad*
+    assert
+
+    movq 16+gObjects(%rip), %rax # Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
+    movl $210, TEXQUAD_X_OFFSET(%rax)
+    movl $310, TEXQUAD_Y_OFFSET(%rax)
+    movl $420, TEXQUAD_W_OFFSET(%rax)
+    movl $320, TEXQUAD_H_OFFSET(%rax)
+
+    movq %rax, %rdi # gObjects[2]
+    movq (%rsp), %rsi # SDL_Surface*, no longer needed
+    leaq 16(%rsp), %rdx # &model
+    call createTexquad
+
+    leaq 16(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
 
     //
 
@@ -1491,7 +1498,7 @@ loop: # receives SDL_Window*
 
     //
 
-    movl $0xffffffff, %edi
+    movl $COLOR_BACKGROUND, %edi
     call clearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
