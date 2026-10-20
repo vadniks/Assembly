@@ -56,7 +56,7 @@ constant VIDEO_DRIVERS
 VIDEO_DRIVERS: .asciz "wayland,x11"
 
 constant WINDOW_NAME
-WINDOW_NAME: .asciz "Memes factory"
+WINDOW_NAME: .asciz "Meme factory"
 
 constant FONT
 FONT: .asciz "font.ttf"
@@ -132,6 +132,7 @@ OBJECT_PROGRAM_OFFSET = 8
 OBJECT_COLOR_OFFSET = 12
 
 // -----------------------------------> TODO: replace sse with avx or vex-sse
+// -----------------------------------> TODO: gpu-driven rendering via compute shaders
 
 # typedef struct {
 #     Object; // ms-anon-structure-tag = copies the whole structure
