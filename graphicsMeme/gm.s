@@ -978,6 +978,11 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 
     //
 
+    testq %rdi, %rdi # check whether the pointer is null in case we've forgotten to adjust the OBJECTS amount
+    jz .LprocessObject.end.noFree # // ignore
+
+    //
+
     # movq %rdi, %rdi
     movl OBJECT_TYPE_OFFSET(%rdi), %eax # object->type
 
@@ -1294,6 +1299,91 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     addq $8, %rsp # stack alignment
     ret
 
+.macro adjustFont ptsize, dpi
+    movq gFont(%rip), %rdi
+    movl $\ptsize, %eax
+    cvtsi2ss %eax, %xmm0
+    movl $\dpi, %esi
+    movl $\dpi, %edx
+    callxt TTF_SetFontSizeDPI
+    assert
+.endm
+
+.macro makeImage image, arrOffset, x, y, w, h, clip
+    leaq \image(%rip), %rdi
+    xorq %rsi, %rsi # TTF_Font* = null -> image
+    xorl %edx, %edx # color rgba bytes, unused
+    call createTexture
+    movq %rax, (%rsp) # SDL_Surface*
+
+    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
+    movl $1, %esi
+    callxt calloc
+    movq %rax, \arrOffset+gObjects(%rip) # gObjects[*] = Texquad*
+    assert
+
+    movq \arrOffset+gObjects(%rip), %rax # gObjects[*] = Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
+    movl $\x, TEXQUAD_X_OFFSET(%rax)
+    movl $\y, TEXQUAD_Y_OFFSET(%rax)
+    movl $\w, TEXQUAD_W_OFFSET(%rax)
+    movl $\h, TEXQUAD_H_OFFSET(%rax)
+    movl $\clip, TEXQUAD_CLIP_OFFSET(%rax)
+
+    movq %rax, %rdi # gObjects[*]
+    movq (%rsp), %rsi # SDL_Surface*, no longer needed
+    leaq 16(%rsp), %rdx # &model
+    call createTexquad # // surface is destroyed in there
+.endm
+
+.macro makeText text, color, arrOffset, x, y, w, h
+    leaq \text(%rip), %rdi
+    movl $\color, %esi # color rgba bytes
+    call createTexture
+    movq %rax, (%rsp) # SDL_Surface*
+
+    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
+    movl $1, %esi
+    callxt calloc
+    movq %rax, \arrOffset+gObjects(%rip) # gObjects[*] = Texquad*
+    assert
+
+    movq \arrOffset+gObjects(%rip), %rax # Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
+    movl $\x, TEXQUAD_X_OFFSET(%rax)
+    movl $\y, TEXQUAD_Y_OFFSET(%rax)
+    movl $\w, TEXQUAD_W_OFFSET(%rax)
+    movl $\h, TEXQUAD_H_OFFSET(%rax)
+
+    movq %rax, %rdi # gObjects[*]
+    movq (%rsp), %rsi # SDL_Surface*, no longer needed
+    leaq 16(%rsp), %rdx # &model
+    call createTexquad # // surface is destroyed in there
+
+    leaq 16(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+.endm
+
+.macro makeLine arrOffset, color, x0, y0, x1, y1, w
+    movl $LINE_SIZE, %edi # sizeof(Line)
+    movl $1, %esi
+    callxt calloc
+    movq %rax, \arrOffset+gObjects(%rip) # gObjects[*] = Line*
+    assert
+
+    movq \arrOffset+gObjects(%rip), %rax # gObjects[*] = Line*
+    movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
+    movl $\color, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
+    movl $\x0, LINE_X0_OFFSET(%rax)
+    movl $\y0, LINE_Y0_OFFSET(%rax)
+    movl $\x1, LINE_X1_OFFSET(%rax)
+    movl $\y1, LINE_Y1_OFFSET(%rax)
+    movl $\w, LINE_WIDTH_OFFSET(%rax)
+
+    movq %rax, %rdi
+    call createLine
+.endm
+
 function createObjects
 createObjects:
     endbr64
@@ -1325,125 +1415,15 @@ createObjects:
 
     //
 
-    leaq IMAGE_NAME(%rip), %rdi
-    xorl %esi, %esi # color = 0 -> image
-    call createTexture
-    movq %rax, (%rsp) # SDL_Surface*
+    makeImage IMAGE_NAME, 0, 0, 0, WIDTH, HEIGHT, 1
 
-    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
-    movl $1, %esi
-    callxt calloc
-    movq %rax, 0+gObjects(%rip) # gObjects[0] = Texquad*
-    assert
+    makeLine 8, COLOR_LINE, 5, 45, WIDTH-5, 45, 75
+    adjustFont 50 50
+    makeText TEXT1, COLOR_TEXT, 16, 10, -5, WIDTH-20, 100
 
-    movq 0+gObjects(%rip), %rax # gObjects[0] = Texquad*
-    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $0, TEXQUAD_X_OFFSET(%rax)
-    movl $0, TEXQUAD_Y_OFFSET(%rax)
-    movl $WIDTH, TEXQUAD_W_OFFSET(%rax)
-    movl $HEIGHT, TEXQUAD_H_OFFSET(%rax)
-    movl $1, TEXQUAD_CLIP_OFFSET(%rax)
-
-    movq %rax, %rdi # gObjects[0]
-    movq (%rsp), %rsi # SDL_Surface*, no longer needed
-    leaq 16(%rsp), %rdx # &model
-    call createTexquad
-
-    //
-
-    movl $LINE_SIZE, %edi # sizeof(Line)
-    movl $1, %esi
-    callxt calloc
-    movq %rax, 8+gObjects(%rip) # gObjects[1] = Line*
-    assert
-
-    movq 8+gObjects(%rip), %rax # gObjects[1] = Line*
-    movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
-    movl $COLOR_LINE, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
-    movl $5, LINE_X0_OFFSET(%rax)
-    movl $45, LINE_Y0_OFFSET(%rax)
-    movl $WIDTH-5, LINE_X1_OFFSET(%rax)
-    movl $45, LINE_Y1_OFFSET(%rax)
-    movl $75, LINE_WIDTH_OFFSET(%rax)
-
-    movq %rax, %rdi
-    call createLine
-
-    //
-
-    leaq TEXT1(%rip), %rdi
-    movl $COLOR_TEXT, %esi # rgb bytes
-    call createTexture
-    movq %rax, (%rsp) # SDL_Surface*
-
-    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
-    movl $1, %esi
-    callxt calloc
-    movq %rax, 16+gObjects(%rip) # gObjects[2] = Texquad*
-    assert
-
-    movq 16+gObjects(%rip), %rax # Texquad*
-    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $10, TEXQUAD_X_OFFSET(%rax)
-    movl $-5, TEXQUAD_Y_OFFSET(%rax)
-    movl $WIDTH-20, TEXQUAD_W_OFFSET(%rax)
-    movl $100, TEXQUAD_H_OFFSET(%rax)
-
-    movq %rax, %rdi # gObjects[2]
-    movq (%rsp), %rsi # SDL_Surface*, no longer needed
-    leaq 16(%rsp), %rdx # &model
-    call createTexquad
-
-    leaq 16(%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-
-    //
-
-    movl $LINE_SIZE, %edi # sizeof(Line)
-    movl $1, %esi
-    callxt calloc
-    movq %rax, 24+gObjects(%rip) # gObjects[3] = Line*
-    assert
-
-    movq 24+gObjects(%rip), %rax # gObjects[3] = Line*
-    movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
-    movl $COLOR_LINE, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
-    movl $5, LINE_X0_OFFSET(%rax)
-    movl $460, LINE_Y0_OFFSET(%rax)
-    movl $WIDTH-5, LINE_X1_OFFSET(%rax)
-    movl $460, LINE_Y1_OFFSET(%rax)
-    movl $75, LINE_WIDTH_OFFSET(%rax)
-
-    movq %rax, %rdi
-    call createLine
-
-    //
-
-    leaq TEXT2(%rip), %rdi
-    movl $COLOR_TEXT, %esi # rgb bytes
-    call createTexture
-    movq %rax, (%rsp) # SDL_Surface*
-
-    movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
-    movl $1, %esi
-    callxt calloc
-    movq %rax, 32+gObjects(%rip) # gObjects[4] = Texquad*
-    assert
-
-    movq 32+gObjects(%rip), %rax # Texquad*
-    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $10, TEXQUAD_X_OFFSET(%rax)
-    movl $410, TEXQUAD_Y_OFFSET(%rax)
-    movl $WIDTH-20, TEXQUAD_W_OFFSET(%rax)
-    movl $100, TEXQUAD_H_OFFSET(%rax)
-
-    movq %rax, %rdi # gObjects[4]
-    movq (%rsp), %rsi # SDL_Surface*, no longer needed
-    leaq 16(%rsp), %rdx # &model
-    call createTexquad
-
-    leaq 16(%rsp), %rdi # &model
-    callxt glmc_mat4_identity
+    makeLine 24, COLOR_LINE, 5, 460, WIDTH-5, 460, 75
+    adjustFont 40 50
+    makeText TEXT2, COLOR_TEXT, 32, 10, 410, WIDTH-20, 100
 
     //
 
@@ -1661,14 +1641,6 @@ main:
     movss FLOATS+0(%rip), %xmm0 # 1.f
     callxt TTF_OpenFont
     movq %rax, gFont(%rip)
-    assert
-
-    movq gFont(%rip), %rdi
-    movl $50, %eax
-    cvtsi2ss %eax, %xmm0
-    movl $50, %esi
-    movl $50, %edx
-    callxt TTF_SetFontSizeDPI
     assert
 
     //

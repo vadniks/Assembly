@@ -11,7 +11,7 @@
 //     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing
 //     effects, result saving to file with image container encoding.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
-// Version: dated July 2026
+// Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
 // mkdir build && (cd build; cmake -G Ninja .. && cd .. && cmake --build build -j 18)
