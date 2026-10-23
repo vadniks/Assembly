@@ -1309,7 +1309,7 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     assert
 .endm
 
-.macro makeImage image, arrOffset, x, y, w, h, clip
+.macro makeImage image, index, x, y, w, h, clip
     leaq \image(%rip), %rdi
     xorq %rsi, %rsi # TTF_Font* = null -> image
     xorl %edx, %edx # color rgba bytes, unused
@@ -1319,10 +1319,10 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
     movl $1, %esi
     callxt calloc
-    movq %rax, \arrOffset+gObjects(%rip) # gObjects[*] = Texquad*
+    movq %rax, \index*8+gObjects(%rip) # gObjects[*] = Texquad*
     assert
 
-    movq \arrOffset+gObjects(%rip), %rax # gObjects[*] = Texquad*
+    movq \index*8+gObjects(%rip), %rax # gObjects[*] = Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
     movl $\x, TEXQUAD_X_OFFSET(%rax)
     movl $\y, TEXQUAD_Y_OFFSET(%rax)
@@ -1336,7 +1336,7 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     call createTexquad # // surface is destroyed in there
 .endm
 
-.macro makeText text, color, arrOffset, x, y, w, h
+.macro makeText text, color, index, x, y, w, h
     leaq \text(%rip), %rdi
     movl $\color, %esi # color rgba bytes
     call createTexture
@@ -1345,10 +1345,10 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
     movl $1, %esi
     callxt calloc
-    movq %rax, \arrOffset+gObjects(%rip) # gObjects[*] = Texquad*
+    movq %rax, \index*8+gObjects(%rip) # gObjects[*] = Texquad*
     assert
 
-    movq \arrOffset+gObjects(%rip), %rax # Texquad*
+    movq \index*8+gObjects(%rip), %rax # Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
     movl $\x, TEXQUAD_X_OFFSET(%rax)
     movl $\y, TEXQUAD_Y_OFFSET(%rax)
@@ -1364,14 +1364,14 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     callxt glmc_mat4_identity
 .endm
 
-.macro makeLine arrOffset, color, x0, y0, x1, y1, w
+.macro makeLine index, color, x0, y0, x1, y1, w
     movl $LINE_SIZE, %edi # sizeof(Line)
     movl $1, %esi
     callxt calloc
-    movq %rax, \arrOffset+gObjects(%rip) # gObjects[*] = Line*
+    movq %rax, \index*8+gObjects(%rip) # gObjects[*] = Line*
     assert
 
-    movq \arrOffset+gObjects(%rip), %rax # gObjects[*] = Line*
+    movq \index*8+gObjects(%rip), %rax # gObjects[*] = Line*
     movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
     movl $\color, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
     movl $\x0, LINE_X0_OFFSET(%rax)
@@ -1415,15 +1415,20 @@ createObjects:
 
     //
 
+    # image, index, x, y, w, h, clip
     makeImage IMAGE_NAME, 0, 0, 0, WIDTH, HEIGHT, 1
 
-    makeLine 8, COLOR_LINE, 5, 45, WIDTH-5, 45, 75
+    # index, color, x0, y0, x1, y1, w
+    makeLine 1, COLOR_LINE, 5, 45, WIDTH-5, 45, 75
     adjustFont 50 50
-    makeText TEXT1, COLOR_TEXT, 16, 10, -5, WIDTH-20, 100
+    # text, color, index, x, y, w, h
+    makeText TEXT1, COLOR_TEXT, 2, 10, -5, WIDTH-20, 100
 
-    makeLine 24, COLOR_LINE, 5, 460, WIDTH-5, 460, 75
+    # index, color, x0, y0, x1, y1, w
+    makeLine 3, COLOR_LINE, 5, 460, WIDTH-5, 460, 75
     adjustFont 40 50
-    makeText TEXT2, COLOR_TEXT, 32, 10, 410, WIDTH-20, 100
+    # text, color, index, x, y, w, h
+    makeText TEXT2, COLOR_TEXT, 4, 10, 410, WIDTH-20, 100
 
     //
 
