@@ -1,0 +1,21 @@
+// Copyright (C) 2026 Vadim Nikolaev (https://github.com/vadniks)
+// SPDX-License-Identifier: GPL-3.0-only
+// GM/gm/gm.s/gm.S - Graphics meme challenge
+
+#version 460 core
+
+layout(binding = 0, rgba8) uniform image2D uTexture;
+
+layout(location = 0) uniform ivec2 uSize;
+layout(location = 1) uniform int uCellSize;
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= uSize.x || pixel.y >= uSize.y) return;
+
+    const ivec2 cellIndices = ivec2(floor(pixel.x / uCellSize), floor(pixel.y / uCellSize));
+    const bool black = (cellIndices.x + cellIndices.y) % 2 == 0;
+    const vec4 color = black ? vec4(0.1, 0.1, 0.1, 0.5) : vec4(0.0, 0.0, 0.0, 0.5);
+
+    imageStore(uTexture, pixel, color);
+}
