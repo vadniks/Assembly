@@ -3,27 +3,27 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
-//     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -mno-red-zone -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lc -lm libcglm.so.0 -Wl,-rpath,. gm.s -o gm && ./gm
+// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -mno-red-zone -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lm -lc libcglm.so.0 -Wl,-rpath,. gm.s -o gm && ./gm
 // or
-// gcc -O3 -s \
-//     -pie -fpie \
-//     -fomit-frame-pointer -fno-plt \
-//     -msse4.2 -mbmi -mno-red-zone \
-//     -Wl,-z,relro,-z,now \
-//     -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lc -lm libcglm.so.0 \
-//     -Wl,-rpath,. \
-//     gm.s -o gm
+// gcc -O3 -s \                                                   # gcc connects the dynamic loader and some bootstrap code that executes from _start() til main() and after, ensure it's optimized and stripped
+//     -pie -fpie \                                               # position independent executable aka dynamic elf64
+//     -fomit-frame-pointer -fno-plt \                            # ensure we don't use frame pointers [the hell with 'em ;)] and that we use got instead of plt
+//     -msse4.2 -mbmi -mno-red-zone \                             # x86-64 extensions: sse4.2 and binary manipulation instruction-set also disable red zone
+//     -Wl,-z,relro,-z,now \                                      # read only relocation table, got
+//     -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lm -lc libcglm.so.0 \ # dynamic libraries
+//     -Wl,-rpath,. \                                             # where to find compiled ones - alongside the executable itself
+//     gm.s -o gm                                                 # input and output file names
 //
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
@@ -51,7 +51,6 @@ DEBUG_D = 0x0a6425 # // %d\n
 DEBUG_F = 0x0a6625 # // %f\n
 DEBUG_A = 0x0a61 # // a\n
 DEBUG_B = 0x0a62 # // b\n
-# TEST_STR = 0x0a54534554 # // TEST\n
 
 .macro constant n # // name
     .align 16
@@ -297,7 +296,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-
+    
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -344,7 +343,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-
+    
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1268,7 +1267,7 @@ createFbos:
 function removeFbos
 removeFbos:
     endbr64
-    subq $8, %rsp # stack alignment and vector of 2 uints // TODO: address of the vector isn't aligned
+    subq $8, %rsp # stack alignment and vector of 2 uints
 
     //
 
