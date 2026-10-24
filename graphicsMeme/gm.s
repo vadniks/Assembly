@@ -14,7 +14,7 @@
 // Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -mno-red-zone -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
 // glslangValidator -G texquad.frag -o texquad.frag.spv
@@ -103,7 +103,7 @@ LINE_FRAGMENT: .incbin "line.frag.spv"
 LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 
 constant FLOATS
-FLOATS: .float 1.0, 2.0
+FLOATS: .float 1.0, 2.0, 0.5, 3.14159265358979323846
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
@@ -1334,6 +1334,9 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     movq (%rsp), %rsi # SDL_Surface*, no longer needed
     leaq 16(%rsp), %rdx # &model
     call createTexquad # // surface is destroyed in there
+
+    leaq 16(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
 .endm
 
 .macro makeText text, color, index, x, y, w, h
@@ -1382,12 +1385,15 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
 
     movq %rax, %rdi
     call createLine
+
+    leaq 16(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
 .endm
 
 function createObjects
 createObjects:
     endbr64
-    CREATE_OBJECTS_STACK = 88 # // 8 alignment and SDL_Surface* 0(%rsp) + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 + padding; 16(%rsp) = mat4 model
+    CREATE_OBJECTS_STACK = 120 # // 8 alignment and SDL_Surface* 0(%rsp) + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 16(%rsp) model + 80() vec4 + 96() vec4 + alignment
     subq $CREATE_OBJECTS_STACK, %rsp
 
     //
@@ -1413,7 +1419,48 @@ createObjects:
     movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
     movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
 
-    //
+    // two additional vectors for transformations are available: 80() vec4 and 96() vec4
+    // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
+
+    leaq 16(%rsp), %rdi # &model
+    #
+    # centralize rotation
+    movl $WIDTH/2, 0+80(%rsp) # vector1[0] = x
+    movl $HEIGHT/2, 4+80(%rsp) # vector1[1] = y
+    movl $0, 8+80(%rsp) # vector1[2] = z
+    movl $0, 12+80(%rsp) # vector1[3]
+    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
+    movaps %xmm0, 80(%rsp) # floats -> vector1
+    leaq 80(%rsp), %rsi # &vector1
+    #
+    # rotation angle
+    movss 12+FLOATS(%rip), %xmm0 # pi
+    movss 8+FLOATS(%rip), %xmm1 # a = 0.5
+    mulss %xmm1, %xmm0 # xmm0 = xmm1 * xmm0 = a * pi
+    #
+    # axis = always z
+    movl $0, 0+96(%rsp) # vector2[0] = x
+    movl $0, 4+96(%rsp) # vector2[1] = y
+    movl $1, 8+96(%rsp) # vector2[2] = z
+    movl $0, 12+96(%rsp) # vector2[3]
+    cvtdq2ps 96(%rsp), %xmm1 # vector2 -> floats
+    movaps %xmm1, 96(%rsp) # floats -> vector2
+    leaq 96(%rsp), %rdx # &vector2
+    #
+    callxt glmc_rotate_at
+
+    leaq 16(%rsp), %rdi # &model
+    #
+    # axis & displacement
+    movl $-50, 0+80(%rsp) # vector1[0] = x
+    movl $260, 4+80(%rsp) # vector1[1] = y
+    movl $0, 8+80(%rsp) # vector1[2] = z
+    movl $0, 12+80(%rsp) # vector1[3]
+    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
+    movaps %xmm0, 80(%rsp) # floats -> vector1
+    #
+    leaq 80(%rsp), %rsi # &vector1
+    callxt glmc_translate
 
     # image, index, x, y, w, h, clip
     makeImage IMAGE_NAME, 0, 0, 0, WIDTH, HEIGHT, 1
