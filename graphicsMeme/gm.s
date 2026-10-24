@@ -112,7 +112,7 @@ LINE_FRAGMENT: .incbin "line.frag.spv"
 LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 
 constant FLOATS
-FLOATS: .float 1.0, 2.0, 0.5, 3.14159265358979323846
+FLOATS: .float 1.0, 2.0, 0.5, 3.14159265358979323846, 1.5, 0.4
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .bss
@@ -1399,6 +1399,63 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     callxt glmc_mat4_identity
 .endm
 
+.macro scale x, y # only floats directly
+    leaq 16(%rsp), %rdi # &model
+    #
+    # axis & factor
+    movl \x, 0+80(%rsp) # vector1[0] = x
+    movl \y, 4+80(%rsp) # vector1[1] = y
+    movl $0, 8+80(%rsp) # vector1[2] = z
+    movl $0, 12+80(%rsp) # vector1[3]
+    #
+    leaq 80(%rsp), %rsi # &vector1
+    callxt glmc_scale
+.endm
+
+.macro rotate x0, y0, angle # center of rotation is in (x0, y0), "angle" is multiplied with PI
+    leaq 16(%rsp), %rdi # &model
+    #
+    # centralize rotation
+    movl $\x0, 0+80(%rsp) # vector1[0] = x
+    movl $\y0, 4+80(%rsp) # vector1[1] = y
+    movl $0, 8+80(%rsp) # vector1[2] = z
+    movl $0, 12+80(%rsp) # vector1[3]
+    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
+    movaps %xmm0, 80(%rsp) # floats -> vector1
+    leaq 80(%rsp), %rsi # &vector1
+    #
+    # rotation angle
+    movss 12+FLOATS(%rip), %xmm0 # pi
+    movss \angle, %xmm1 # a
+    mulss %xmm1, %xmm0 # xmm0 = xmm1 * xmm0 = a * pi
+    #
+    # axis = always z
+    movl $0, 0+96(%rsp) # vector2[0] = x
+    movl $0, 4+96(%rsp) # vector2[1] = y
+    movl $1, 8+96(%rsp) # vector2[2] = z
+    movl $0, 12+96(%rsp) # vector2[3]
+    cvtdq2ps 96(%rsp), %xmm1 # vector2 -> floats
+    movaps %xmm1, 96(%rsp) # floats -> vector2
+    leaq 96(%rsp), %rdx # &vector2
+    #
+    callxt glmc_rotate_at
+.endm
+
+.macro translate x, y
+    leaq 16(%rsp), %rdi # &model
+    #
+    # axis & displacement
+    movl $\x, 0+80(%rsp) # vector1[0] = x
+    movl $\y, 4+80(%rsp) # vector1[1] = y
+    movl $0, 8+80(%rsp) # vector1[2] = z
+    movl $0, 12+80(%rsp) # vector1[3]
+    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
+    movaps %xmm0, 80(%rsp) # floats -> vector1
+    #
+    leaq 80(%rsp), %rsi # &vector1
+    callxt glmc_translate
+.endm
+
 function createObjects
 createObjects:
     endbr64
@@ -1431,60 +1488,26 @@ createObjects:
     // two additional vectors for transformations are available: 80() vec4 and 96() vec4
     // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
 
-    leaq 16(%rsp), %rdi # &model
-    #
-    # centralize rotation
-    movl $WIDTH/2, 0+80(%rsp) # vector1[0] = x
-    movl $HEIGHT/2, 4+80(%rsp) # vector1[1] = y
-    movl $0, 8+80(%rsp) # vector1[2] = z
-    movl $0, 12+80(%rsp) # vector1[3]
-    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
-    movaps %xmm0, 80(%rsp) # floats -> vector1
-    leaq 80(%rsp), %rsi # &vector1
-    #
-    # rotation angle
-    movss 12+FLOATS(%rip), %xmm0 # pi
-    movss 8+FLOATS(%rip), %xmm1 # a = 0.5
-    mulss %xmm1, %xmm0 # xmm0 = xmm1 * xmm0 = a * pi
-    #
-    # axis = always z
-    movl $0, 0+96(%rsp) # vector2[0] = x
-    movl $0, 4+96(%rsp) # vector2[1] = y
-    movl $1, 8+96(%rsp) # vector2[2] = z
-    movl $0, 12+96(%rsp) # vector2[3]
-    cvtdq2ps 96(%rsp), %xmm1 # vector2 -> floats
-    movaps %xmm1, 96(%rsp) # floats -> vector2
-    leaq 96(%rsp), %rdx # &vector2
-    #
-    callxt glmc_rotate_at
-
-    leaq 16(%rsp), %rdi # &model
-    #
-    # axis & displacement
-    movl $-50, 0+80(%rsp) # vector1[0] = x
-    movl $260, 4+80(%rsp) # vector1[1] = y
-    movl $0, 8+80(%rsp) # vector1[2] = z
-    movl $0, 12+80(%rsp) # vector1[3]
-    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
-    movaps %xmm0, 80(%rsp) # floats -> vector1
-    #
-    leaq 80(%rsp), %rsi # &vector1
-    callxt glmc_translate
-
+    # x, y
+    scale $0x40000000 $0x40000000 # // 2.f 2.f
+    # x0, y0, angle
+    rotate WIDTH/2 HEIGHT/2 20+FLOATS(%rip)
+    # x, y
+    translate -270 200
     # image, index, x, y, w, h, clip
-    makeImage IMAGE_NAME, 0, 0, 0, WIDTH, HEIGHT, 1
+    makeImage IMAGE_NAME 0 0 0 WIDTH HEIGHT 1
 
     # index, color, x0, y0, x1, y1, w
-    makeLine 1, COLOR_LINE, 5, 45, WIDTH-5, 45, 75
+    makeLine 1 COLOR_LINE 5 45 WIDTH-5 45 75
     adjustFont 50 50
     # text, color, index, x, y, w, h
-    makeText TEXT1, COLOR_TEXT, 2, 10, -5, WIDTH-20, 100
+    makeText TEXT1 COLOR_TEXT 2 10 -5 WIDTH-20 100
 
     # index, color, x0, y0, x1, y1, w
-    makeLine 3, COLOR_LINE, 5, 460, WIDTH-5, 460, 75
+    makeLine 3 COLOR_LINE 5 460 WIDTH-5 460 75
     adjustFont 40 50
     # text, color, index, x, y, w, h
-    makeText TEXT2, COLOR_TEXT, 4, 10, 410, WIDTH-20, 100
+    makeText TEXT2 COLOR_TEXT 4 10 410 WIDTH-20 100
 
     //
 
