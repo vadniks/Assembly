@@ -3,13 +3,14 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
-//     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding.
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
+//     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
@@ -30,6 +31,7 @@
 // glslangValidator -G texquad.frag -o texquad.frag.spv
 // glslangValidator -G line.vert -o line.vert.spv
 // glslangValidator -G line.frag -o line.frag.spv
+// glslangValidator -G general.comp -o general.comp.spv
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
@@ -111,6 +113,10 @@ constant LINE_FRAGMENT
 LINE_FRAGMENT: .incbin "line.frag.spv"
 LINE_FRAGMENT_SIZE = (. - LINE_FRAGMENT)
 
+constant GENERAL_COMPUTE
+GENERAL_COMPUTE: .incbin "general.comp.spv"
+GENERAL_COMPUTE_SIZE = (. - GENERAL_COMPUTE)
+
 constant FLOATS
 FLOATS: .float 1.0, 2.0, 0.5, 3.14159265358979323846, 1.5, 0.4
 
@@ -191,6 +197,17 @@ FBO_TEXTURE_OFFSET = 4
 variable gMsaaFbo FBO_SIZE # // Fbo
 variable gPostprocessingFbo FBO_SIZE # // Fbo
 variable gPostprocessingTexquad TEXQUAD_SIZE # // Texquad
+
+# typedef struct {
+#     GLuint program, texture;
+#     <long padding>;
+# } Compute; // size = 2 * 4 + 8 padding = 16
+
+COMPUTE_SIZE = 16
+COMPUTE_PROGRAM_OFFSET = 0
+COMPUTE_TEXTURE_OFFSET = 4
+
+variable gCompute COMPUTE_SIZE # // Compute shader
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .text
@@ -296,7 +313,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-    
+
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -343,8 +360,192 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-    
+
     addq $BOOTSTRAP_QUAD_STACK, %rsp
+    ret
+
+function makeCompute
+makeCompute: # returns uint program
+    endbr64
+    MAKE_COMPUTE_STACK = 24
+    subq $MAKE_COMPUTE_STACK, %rsp # alignment and uint variables 0() shader, 4() program, 8() success, padding
+
+    movl $0, (%rsp) # shader
+    movl $0, 4(%rsp) # program
+    movl $0, 8(%rsp) # success
+
+    //
+
+    movl $0x91b9, %edi # GL_COMPUTE_SHADER
+    callxt glCreateShader
+    movl %eax, (%rsp) # shader
+    assert
+
+    movl $1, %edi
+    leaq (%rsp), %rsi # &shader
+    movl $0x9551, %edx # GL_SHADER_BINARY_FORMAT_SPIR_V
+    leaq GENERAL_COMPUTE(%rip), %rcx
+    movl $GENERAL_COMPUTE_SIZE, %r8d
+    callxt glShaderBinary
+
+    movl (%rsp), %edi # shader
+    leaq ENTRY_POINT(%rip), %rsi
+    xorl %edx, %edx
+    xorq %rcx, %rcx
+    xorq %r8, %r8
+    callxt glSpecializeShader
+
+    movl (%rsp), %edi # shader
+    movl $0x8b81, %esi # GL_COMPILE_STATUS
+    leaq 8(%rsp), %rdx # &success
+    callxt glGetShaderiv
+    movl 8(%rsp), %eax # success
+    assert
+
+    //
+
+    callxt glCreateProgram
+    movl %eax, 4(%rsp) # program
+    assert
+
+    movl 4(%rsp), %edi # program
+    movl (%rsp), %esi # shader
+    callxt glAttachShader
+
+    movl 4(%rsp), %edi # program
+    callxt glLinkProgram
+
+    movl 4(%rsp), %edi # program
+    movl $0x8b82, %esi # GL_LINK_STATUS
+    leaq 8(%rsp), %rdx # &success
+    callxt glGetProgramiv
+    movl 8(%rsp), %eax # success
+    assert
+
+    //
+
+    movl 4(%rsp), %edi # program
+    callxt glValidateProgram
+
+    movl 4(%rsp), %edi # program
+    movl $0x8b83, %esi # GL_VALIDATE_STATUS
+    leaq 8(%rsp), %rdx # &success
+    callxt glGetProgramiv
+    movl 8(%rsp), %eax # success
+    assert
+
+    //
+
+    movl 4(%rsp), %edi # program
+    movl (%rsp), %esi # shader
+    callxt glDetachShader
+
+    movl (%rsp), %edi # shader
+    callxt glDeleteShader
+
+    //
+
+    movl 4(%rsp), %eax # return program
+    addq $MAKE_COMPUTE_STACK, %rsp
+    ret
+
+// TODO: unify shader-creating functions
+
+function bootstrapCompute
+bootstrapCompute:
+    endbr64
+    subq $8, %rsp # alignment and temp vector
+
+    call makeCompute
+    movl %eax, COMPUTE_PROGRAM_OFFSET+gCompute(%rip) # gCompute.program = result
+
+    //
+
+    movl $0x0de1, %edi # GL_TEXTURE_2D
+    movl $1, %esi
+    leaq COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %rdx # &gCompute.texture
+    callxt glCreateTextures
+    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %eax # gCompute.texture
+    assert
+
+    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edi # gCompute.texture
+    movl $1, %esi
+    movl $0x8058, %edx # GL_RGBA8
+    movl $WIDTH, %ecx
+    movl $HEIGHT, %r8d
+    callxt glTextureStorage2D
+
+    xorl %edi, %edi
+    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %esi # gCompute.texture
+    xorl %edx, %edx
+    xorl %ecx, %ecx # GL_FALSE
+    xorl %r8d, %r8d
+    movl $0x88b9, %r9d # GL_WRITE_ONLY
+    pushq $0 # // not 8th - alignment
+    pushq $0x8058 # // 7th, GL_RGBA8
+    callxt glBindImageTexture
+    addq $16, %rsp # free stack
+
+    //
+
+    movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
+    xorl %esi, %esi
+    movl $1, %edx
+    movl $WIDTH, 0+0(%rsp) # vector[0]
+    movl $HEIGHT, 0+4(%rsp) # vector[1]
+    leaq 0(%rsp), %rcx # &vector
+    callxt glProgramUniform2iv
+
+    movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
+    movl $1, %esi
+    movl $8, %edx # cell size
+    callxt glProgramUniform1i
+
+    //
+
+    addq $8, %rsp
+    ret
+
+function runCompute
+runCompute:
+    endbr64
+    subq $8, %rsp
+
+    movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
+    callxt glUseProgram
+
+    //
+
+    movl $WIDTH, %edi
+    movl $HEIGHT, %esi
+    movl $1, %edx
+    callxt glDispatchCompute
+
+    movl $0x20, %edi # GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
+    orl $0x2000, %edi # GL_SHADER_STORAGE_BARRIER_BIT
+    callxt glMemoryBarrier
+
+    //
+
+    xorl %edi, %edi
+    callxt glUseProgram
+
+    addq $8, %rsp
+    ret
+
+function deleteCompute
+deleteCompute:
+    endbr64
+    subq $8, %rsp # alignment
+
+    movl $1, %edi
+    leaq COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %rsi # &gCompute.texture
+    callxt glDeleteTextures
+
+    movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
+    callxt glDeleteProgram
+
+    addq $8, %rsp
     ret
 
 function makeShaders
@@ -1318,13 +1519,15 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     assert
 .endm
 
-.macro makeImage image, index, x, y, w, h, clip
-    leaq \image(%rip), %rdi
+.macro makeImage image, index, x, y, w, h, clip # image can yield nullable value via leaq and in that case this creates an empty texquad (intended for foreign textures or stenciling)
+    leaq \image, %rdi
+    testq %rdi, %rdi #
+    jz 1f #
     xorq %rsi, %rsi # TTF_Font* = null -> image
     xorl %edx, %edx # color rgba bytes, unused
     call createTexture
     movq %rax, (%rsp) # SDL_Surface*
-
+1:
     movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
     movl $1, %esi
     callxt calloc
@@ -1339,6 +1542,12 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     movl $\h, TEXQUAD_H_OFFSET(%rax)
     movl $\clip, TEXQUAD_CLIP_OFFSET(%rax)
 
+    leaq \image, %rdi
+    testq %rdi, %rdi #
+    jnz 1f #
+    movl %ebx, TEXQUAD_TEXTURE_OFFSET(%rax) # foreign texture
+    movq $0, (%rsp) # null SDL_Surface*
+1:
     movq %rax, %rdi # gObjects[*]
     movq (%rsp), %rsi # SDL_Surface*, no longer needed
     leaq 16(%rsp), %rdx # &model
@@ -1464,6 +1673,7 @@ createObjects:
 
     //
 
+    call bootstrapCompute
     call createUbo
     call createFbos
 
@@ -1488,6 +1698,8 @@ createObjects:
     // two additional vectors for transformations are available: 80() vec4 and 96() vec4
     // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
 
+    // TODO: make these macros be real functions
+
     # x, y
     scale $0x40000000 $0x40000000 # // 2.f 2.f
     # x0, y0, angle
@@ -1495,7 +1707,9 @@ createObjects:
     # x, y
     translate -270 200
     # image, index, x, y, w, h, clip
-    makeImage IMAGE_NAME 0 0 0 WIDTH HEIGHT 1
+    xorq %rbp, %rbp
+    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %ebx
+    makeImage (%rbp), 0, 0, 0, WIDTH, HEIGHT, 1
 
     # index, color, x0, y0, x1, y1, w
     makeLine 1 COLOR_LINE 5 45 WIDTH-5 45 75
@@ -1538,6 +1752,7 @@ removeObjects:
     call removeTexquad
     call removeFbos
     call removeUbo
+    call deleteCompute
 
     addq $8, %rsp # stack alignment
     ret
@@ -1607,6 +1822,7 @@ loop: # receives SDL_Window*
     //
 
     call createObjects
+    call runCompute
 
 .Lloop.infiniteLoop:
     callxt SDL_GetTicks
