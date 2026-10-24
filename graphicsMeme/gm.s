@@ -8,13 +8,23 @@
 //     GNU Assembly(er), and x64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
 //     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
 //     images via code - the lowest level possible! The features include: render of various sized textures of different images,
-//     text render, arbitrary lines (size, color, position, width, slope, opacity), texture clipping, antializing, postprocessing
-//     effects, result saving to file with image container encoding.
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
 
-// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -mno-red-zone -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL libcglm.so.0 -Wl,-rpath,. gm.s -o gm
+// gcc -O3 -s -pie -fpie -fomit-frame-pointer -fno-plt -msse4.2 -mbmi -mno-red-zone -Wl,-z,relro,-z,now -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lc -lm libcglm.so.0 -Wl,-rpath,. gm.s -o gm && ./gm
+// or
+// gcc -O3 -s \
+//     -pie -fpie \
+//     -fomit-frame-pointer -fno-plt \
+//     -msse4.2 -mbmi -mno-red-zone \
+//     -Wl,-z,relro,-z,now \
+//     -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lc -lm libcglm.so.0 \
+//     -Wl,-rpath,. \
+//     gm.s -o gm
+//
 // vulkan-tools glslang for glsl to spirv compilation
 // glslangValidator -G texquad.vert -o texquad.vert.spv
 // glslangValidator -G texquad.frag -o texquad.frag.spv
