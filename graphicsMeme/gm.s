@@ -1543,16 +1543,6 @@ adjustFont: # receives int ptsize, int dpi
     callxt glmc_mat4_identity
 .endm
 
-function aaa
-aaa:
-    endbr64
-    subq $8, %rsp
-
-
-
-    addq $8, %rsp
-    ret
-
 function makeImage # // image can yield nullable value via leaq and in that case this creates an empty texquad (intended for foreign textures or stenciling)
 makeImage: # receives void* model, nullable void* image, int index, long{x, y}, long{w, h}, bool/int clip, r10[unconventional for optimization] - nullable int foreignTexture
     endbr64
@@ -1604,10 +1594,6 @@ makeImage: # receives void* model, nullable void* image, int index, long{x, y}, 
     movl $0, OBJECT_TYPE_OFFSET(%rdi) # TYPE_TEXQUAD
     movaps 32(%rsp), %xmm0
     movaps %xmm0, TEXQUAD_X_OFFSET(%rdi)
-    # movq 32(%rsp), %rax # {x, y}
-    # movq %rax, TEXQUAD_X_OFFSET(%rdi)
-    # movq 40(%rsp), %rax # {w, h}
-    # movq %rax, TEXQUAD_W_OFFSET(%rdi)
     movl 48(%rsp), %eax # clip
     movl %eax, TEXQUAD_CLIP_OFFSET(%rdi)
 
@@ -1661,28 +1647,42 @@ makeText: # receives void* model, void* text, int color, int index, long{x, y}, 
     addq $MAKE_TEXT_STACK, %rsp
     ret
 
-.macro makeLine index, color, x0, y0, x1, y1, w
+function makeLine
+makeLine: # receives int index, int color, long{x0, y0}, long{x1, y1}, int w
+    endbr64
+    MAKE_LINE_STACK = 40
+    subq $MAKE_LINE_STACK, %rsp # 3 * 4 int + 2 * 8 long + 12 padding for alignment
+
+    movl %edi, 16(%rsp) # index
+    movl %esi, 20(%rsp) # color
+    movq %rdx, 0(%rsp) # x0 y0
+    movq %rcx, 8(%rsp) # x1 y1
+    movl %r8d, 24(%rsp) # w
+
     movl $LINE_SIZE, %edi # sizeof(Line)
     movl $1, %esi
     callxt calloc
-    movq %rax, \index*8+gObjects(%rip) # gObjects[*] = Line*
+    #
+    leaq gObjects(%rip), %rdi # &gobjects[0]
+    movl 16(%rsp), %esi # index
+    leaq 0(%rdi, %rsi, 8), %rsi # 0 + rdi + rsi * 8; rsi = &gObjects[index]
+    movq %rax, (%rsi) # gObjects[*] = Texquad*
     assert
 
-    movq \index*8+gObjects(%rip), %rax # gObjects[*] = Line*
-    movl $1, OBJECT_TYPE_OFFSET(%rax) # TYPE_LINE
-    movl $\color, OBJECT_COLOR_OFFSET(%rax) # rgba bytes
-    movl $\x0, LINE_X0_OFFSET(%rax)
-    movl $\y0, LINE_Y0_OFFSET(%rax)
-    movl $\x1, LINE_X1_OFFSET(%rax)
-    movl $\y1, LINE_Y1_OFFSET(%rax)
-    movl $\w, LINE_WIDTH_OFFSET(%rax)
+    movq %rax, %rdi # gObjects[*] = Line*
+    movl $1, OBJECT_TYPE_OFFSET(%rdi) # TYPE_LINE
+    movl 20(%rsp), %eax # color
+    movl %eax, OBJECT_COLOR_OFFSET(%rdi) # rgba bytes
+    movaps 0(%rsp), %xmm0 # all values at once
+    movaps %xmm0, LINE_X0_OFFSET(%rdi)
+    movl 24(%rsp), %eax # w
+    movl %eax, LINE_WIDTH_OFFSET(%rdi)
 
-    movq %rax, %rdi
+    # movq %rax, %rdi
     call createLine
 
-    leaq 16(%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-.endm
+    addq $MAKE_LINE_STACK, %rsp
+    ret
 
 .macro scale x, y # only floats directly
     leaq 16(%rsp), %rdi # &model
@@ -1802,7 +1802,14 @@ createObjects:
     resetModel
 
     # index, color, x0, y0, x1, y1, w
-    makeLine 1 COLOR_LINE 5 45 WIDTH-5 45 75
+    # makeLine 1 COLOR_LINE 5 45 WIDTH-5 45 75
+    # int index, int color, long{x0, y0}, long{x1, y1}, int w
+    movl $1, %edi
+    movl $COLOR_LINE, %esi
+    tuple 5 45 edx rdx
+    tuple WIDTH-5 45 ecx rcx
+    movl $75, %r8d
+    call makeLine
 
     resetModel
 
@@ -1822,7 +1829,14 @@ createObjects:
     # makeText TEXT1 COLOR_TEXT 2 10 -5 WIDTH-20 100
 
     # index, color, x0, y0, x1, y1, w
-    makeLine 3 COLOR_LINE 5 460 WIDTH-5 460 75
+    # makeLine 3 COLOR_LINE 5 460 WIDTH-5 460 75
+    movl $3, %edi
+    movl $COLOR_LINE, %esi
+    tuple 5 460 edx rdx
+    tuple WIDTH-5 460 ecx rcx
+    movl $75, %r8d
+    call makeLine
+
     movl $40, %edi
     movl $50, %esi
     call adjustFont
