@@ -3,12 +3,12 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
 //     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
@@ -313,7 +313,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-
+    
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -360,7 +360,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-
+    
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1745,20 +1745,30 @@ rotate: # receives * model, int x0, int y0, float angle (factor) ecx[unconventio
     addq $ROTATE_STACK, %rsp
     ret
 
-.macro translate x, y
-    leaq 16(%rsp), %rdi # &model
-    #
+function translate
+translate: # receives * model, int x, int y
+    endbr64
+    TRANSLATE_STACK = 24
+    subq $TRANSLATE_STACK, %rsp # 0() vec16 + alignment
+
+    # movq %rdi, %rdi # model
+    # movl %esi, %esi # x
+    # movl %edx, %edx # y
+
+    # movq %rdi, %rdi # model
     # axis & displacement
-    movl $\x, 0+80(%rsp) # vector1[0] = x
-    movl $\y, 4+80(%rsp) # vector1[1] = y
-    movl $0, 8+80(%rsp) # vector1[2] = z
-    movl $0, 12+80(%rsp) # vector1[3]
-    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
-    movaps %xmm0, 80(%rsp) # floats -> vector1
+    movl %esi, 0(%rsp) # vector[0] = x
+    movl %edx, 4(%rsp) # vector[1] = y
+    movl $0, 8(%rsp) # vector[2] = z
+    movl $0, 12(%rsp) # vector[3]
+    cvtdq2ps 0(%rsp), %xmm0 # vector -> floats
+    movaps %xmm0, 0(%rsp) # floats -> vector
     #
-    leaq 80(%rsp), %rsi # &vector1
+    leaq 0(%rsp), %rsi # &vector
     callxt glmc_translate
-.endm
+
+    addq $TRANSLATE_STACK, %rsp
+    ret
 
 .macro tuple a, b, r32, r64
     movl $\b, %\r32 # with respect to the endianess
@@ -1810,8 +1820,11 @@ createObjects:
     movl 20+FLOATS(%rip), %ecx
     call rotate
 
-    # x, y
-    translate -270 200
+    # translate -270 200
+    leaq 16(%rsp), %rdi # void* model
+    movl $-270, %esi
+    movl $200, %edx
+    call translate
 
     leaq 16(%rsp), %rdi # void* model
     leaq IMAGE_NAME(%rip), %rsi # void* image
