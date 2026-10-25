@@ -1519,16 +1519,6 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     addq $8, %rsp # stack alignment
     ret
 
-.macro adjustFont ptsize, dpi
-    movq gFont(%rip), %rdi
-    movl $\ptsize, %eax
-    cvtsi2ss %eax, %xmm0
-    movl $\dpi, %esi
-    movl $\dpi, %edx
-    callxt TTF_SetFontSizeDPI
-    assert
-.endm
-
 function adjustFont
 adjustFont: # receives int ptsize, int dpi
     endbr64
@@ -1548,6 +1538,11 @@ adjustFont: # receives int ptsize, int dpi
     addq $8, %rsp
     ret
 
+.macro resetModel
+    leaq 16(%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+.endm
+
 function aaa
 aaa:
     endbr64
@@ -1557,10 +1552,6 @@ aaa:
 
     addq $8, %rsp
     ret
-
-// xorq %rbp, %rbp
-// movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %ebx
-// makeImage (%rbp), 0, 0, 0, WIDTH, HEIGHT, 1
 
 function makeImage # // image can yield nullable value via leaq and in that case this creates an empty texquad (intended for foreign textures or stenciling)
 makeImage: # receives void* model, nullable void* image, int index, long{x, y}, long{w, h}, bool/int clip, r10[unconventional for optimization] - nullable int foreignTexture
@@ -1572,10 +1563,10 @@ makeImage: # receives void* model, nullable void* image, int index, long{x, y}, 
     movq $0, 8(%rsp) # * surface
     # movq %rsi, %rsi # void* image
     movl %edx, 16(%rsp) # int index
-    movq %rcx, 20(%rsp) # long{x, y} # TODO: align these vectors for simd move
-    movq %r8, 28(%rsp) # long{w, h}
-    movl %r9d, 36(%rsp) # bool/int clip
-    movl %r10d, 40(%rsp) # foreignTexture
+    movq %rcx, 32(%rsp) # long{x, y}
+    movq %r8, 40(%rsp) # long{w, h}
+    movl %r9d, 48(%rsp) # bool/int clip
+    movl %r10d, 52(%rsp) # foreignTexture
 
     movq %rsi, %rsi # image
     testq %rsi, %rsi # if image is null then skip this
@@ -1605,18 +1596,19 @@ makeImage: # receives void* model, nullable void* image, int index, long{x, y}, 
     movq 8(%rsp), %rax # * surface
     testq %rax, %rax # if it's null
     jnz 1f
-    movl 40(%rsp), %eax # foreignTexture
+    movl 52(%rsp), %eax # foreignTexture
     movl %eax, TEXQUAD_TEXTURE_OFFSET(%rdi)
-    # cmovzl 40(%rsp), TEXQUAD_TEXTURE_OFFSET(%rdi) # unsupported
 1:
 
     # movq (%rsi), %rdi # gObjects[*] = Texquad*
     movl $0, OBJECT_TYPE_OFFSET(%rdi) # TYPE_TEXQUAD
-    movq 20(%rsp), %rax # {x, y}
-    movq %rax, TEXQUAD_X_OFFSET(%rdi)
-    movq 28(%rsp), %rax # {w, h}
-    movq %rax, TEXQUAD_W_OFFSET(%rdi)
-    movl 36(%rsp), %eax # clip
+    movaps 32(%rsp), %xmm0
+    movaps %xmm0, TEXQUAD_X_OFFSET(%rdi)
+    # movq 32(%rsp), %rax # {x, y}
+    # movq %rax, TEXQUAD_X_OFFSET(%rdi)
+    # movq 40(%rsp), %rax # {w, h}
+    # movq %rax, TEXQUAD_W_OFFSET(%rdi)
+    movl 48(%rsp), %eax # clip
     movl %eax, TEXQUAD_CLIP_OFFSET(%rdi)
 
     # movq %rdi, %rdi # gObjects[*]
@@ -1624,40 +1616,50 @@ makeImage: # receives void* model, nullable void* image, int index, long{x, y}, 
     movq (%rsp), %rdx # * model
     call createTexquad # // * surface is destroyed in there
 
-    # TODO: extract model resetting to a macro
-    movq (%rsp), %rdi # * model
-    callxt glmc_mat4_identity
-
     addq $MAKE_IMAGE_STACK, %rsp
     ret
 
-.macro makeText text, color, index, x, y, w, h
-    leaq \text(%rip), %rdi
-    movl $\color, %esi # color rgba bytes
+function makeText
+makeText: # receives void* model, void* text, int color, int index, long{x, y}, long{w, h}
+    endbr64
+    MAKE_TEXT_STACK = 40
+    subq $MAKE_TEXT_STACK, %rsp # vec{long{x, y}, long{w, h}} 16 + int index 4 + SDL_Surface* 8 + model 8 + 4 padding
+
+    movq %rdi, 28(%rsp) # model
+    # movq %rsi, %rdi # text
+    # movl %edx, %esi # color
+    movl %ecx, 16(%rsp) # index
+    movq %r8, 0(%rsp) # {x, y}
+    movq %r9, 8(%rsp) # {w, h}
+    # movq $0, 20(%rsp) # surface
+
+    movq %rsi, %rdi # text
+    movl %edx, %esi # color rgba bytes
     call createTexture
-    movq %rax, (%rsp) # SDL_Surface*
+    movq %rax, 20(%rsp) # SDL_Surface*
 
     movl $TEXQUAD_SIZE, %edi # sizeof(Texquad)
     movl $1, %esi
     callxt calloc
-    movq %rax, \index*8+gObjects(%rip) # gObjects[*] = Texquad*
+    #
+    leaq gObjects(%rip), %rdi # &gobjects[0]
+    movl 16(%rsp), %esi # index
+    leaq 0(%rdi, %rsi, 8), %rsi # 0 + rdi + rsi * 8; rsi = &gObjects[index]
+    movq %rax, (%rsi) # gObjects[*] = Texquad*
     assert
 
-    movq \index*8+gObjects(%rip), %rax # Texquad*
-    movl $0, OBJECT_TYPE_OFFSET(%rax) # TYPE_TEXQUAD
-    movl $\x, TEXQUAD_X_OFFSET(%rax)
-    movl $\y, TEXQUAD_Y_OFFSET(%rax)
-    movl $\w, TEXQUAD_W_OFFSET(%rax)
-    movl $\h, TEXQUAD_H_OFFSET(%rax)
+    movq (%rsi), %rdi # Texquad*
+    movl $0, OBJECT_TYPE_OFFSET(%rdi) # TYPE_TEXQUAD
+    movaps 0(%rsp), %xmm0
+    movaps %xmm0, TEXQUAD_X_OFFSET(%rdi) # move all 4 ints simultaneously
 
-    movq %rax, %rdi # gObjects[*]
-    movq (%rsp), %rsi # SDL_Surface*, no longer needed
-    leaq 16(%rsp), %rdx # &model
+    # movq %rdi, %rdi # gObjects[*]
+    movq 20(%rsp), %rsi # SDL_Surface*, no longer needed
+    movq 28(%rsp), %rdx # * model
     call createTexquad # // surface is destroyed in there
 
-    leaq 16(%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-.endm
+    addq $MAKE_TEXT_STACK, %rsp
+    ret
 
 .macro makeLine index, color, x0, y0, x1, y1, w
     movl $LINE_SIZE, %edi # sizeof(Line)
@@ -1739,6 +1741,12 @@ makeImage: # receives void* model, nullable void* image, int index, long{x, y}, 
     callxt glmc_translate
 .endm
 
+.macro tuple a, b, r32, r64
+    movl $\b, %\r32 # with respect to the endianess
+    shlq $32, %\r64 # move b to high bits (to left)
+    orq $\a, %\r64 # move a to low bits (to right)
+.endm
+
 function createObjects
 createObjects:
     endbr64
@@ -1772,8 +1780,6 @@ createObjects:
     // two additional vectors for transformations are available: 80() vec4 and 96() vec4
     // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
 
-    // TODO: make these macros be real functions
-
     # x, y
     scale $0x40000000 $0x40000000 # // 2.f 2.f
     # x0, y0, angle
@@ -1783,28 +1789,37 @@ createObjects:
 
     leaq 16(%rsp), %rdi # void* model
     leaq IMAGE_NAME(%rip), %rsi # void* image
-    # xorq %rsi, %rsi # void* image
     movl $0, %edx # int index
     movq $0x00000000, %rcx # swapped[long{x, y} = {0, 0}] due to endianess -> {y, x}
-    movl $HEIGHT, %r8d
-    shlq $32, %r8 # move h to high bits (to left)
-    orq $WIDTH, %r8 # move w to low bits (to right)
+    tuple WIDTH HEIGHT r8d r8
+    # movl $HEIGHT, %r8d
+    # shlq $32, %r8 # move h to high bits (to left)
+    # orq $WIDTH, %r8 # move w to low bits (to right)
     # movq r8, %r8 # swapped[long{w, h}] -> {h, w}
     movl $1, %r9d # bool/int clip
-    # movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %r10d # foreignTexture
     call makeImage
 
-    # movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %r10d # foreignTexture
-    # movq 0+gObjects(%rip), %rax
-    # movl %r10d, TEXQUAD_TEXTURE_OFFSET(%rax)
+    resetModel
 
     # index, color, x0, y0, x1, y1, w
     makeLine 1 COLOR_LINE 5 45 WIDTH-5 45 75
+
+    resetModel
+
     movl $50, %edi
     movl $50, %esi
     call adjustFont
-    # text, color, index, x, y, w, h
-    makeText TEXT1 COLOR_TEXT 2 10 -5 WIDTH-20 100
+    #
+    # void* model, void* text, int color, int index, long{x, y}, long{w, h}
+    leaq 16(%rsp), %rdi
+    leaq TEXT1(%rip), %rsi
+    movl $COLOR_TEXT, %edx
+    movl $2, %ecx
+    xorq %r8, %r8
+    tuple 10 -5 r8d r8
+    tuple WIDTH-20 100 r9d r9
+    call makeText
+    # makeText TEXT1 COLOR_TEXT 2 10 -5 WIDTH-20 100
 
     # index, color, x0, y0, x1, y1, w
     makeLine 3 COLOR_LINE 5 460 WIDTH-5 460 75
@@ -1812,7 +1827,14 @@ createObjects:
     movl $50, %esi
     call adjustFont
     # text, color, index, x, y, w, h
-    makeText TEXT2 COLOR_TEXT 4 10 410 WIDTH-20 100
+    # makeText TEXT2 COLOR_TEXT 4 10 410 WIDTH-20 100
+    leaq 16(%rsp), %rdi
+    leaq TEXT2(%rip), %rsi
+    movl $COLOR_TEXT, %edx
+    movl $4, %ecx
+    tuple 10 410 r8d r8
+    tuple WIDTH-20 100 r9d r9
+    call makeText
 
     //
 
