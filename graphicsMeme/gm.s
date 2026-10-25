@@ -20,7 +20,7 @@
 // gcc -O3 -s \                                                   # gcc connects the dynamic loader and some bootstrap code that executes from _start() til main() and after, ensure it's optimized and stripped
 //     -pie -fpie \                                               # position independent executable aka dynamic elf64
 //     -fomit-frame-pointer -fno-plt \                            # ensure we don't use frame pointers [the hell with 'em ;)] and that we use got instead of plt
-//     -msse4.2 -mbmi -mno-red-zone \                             # x86-64 extensions: sse4.2 and binary manipulation instruction-set also disable red zone
+//     -msse4.2 -mbmi -mno-red-zone \                             # x86-64 extensions: sse4.2 and bit manipulation instruction-set also disable red zone
 //     -Wl,-z,relro,-z,now \                                      # read only relocation table, got
 //     -lSDL3 -lSDL3_ttf -lSDL3_image -lGL -lm -lc libcglm.so.0 \ # dynamic libraries
 //     -Wl,-rpath,. \                                             # where to find compiled ones - alongside the executable itself
@@ -1684,47 +1684,66 @@ makeLine: # receives int index, int color, long{x0, y0}, long{x1, y1}, int w
     addq $MAKE_LINE_STACK, %rsp
     ret
 
-.macro scale x, y # only floats directly
-    leaq 16(%rsp), %rdi # &model
-    #
-    # axis & factor
-    movl \x, 0+80(%rsp) # vector1[0] = x
-    movl \y, 4+80(%rsp) # vector1[1] = y
-    movl $0, 8+80(%rsp) # vector1[2] = z
-    movl $0, 12+80(%rsp) # vector1[3]
-    #
-    leaq 80(%rsp), %rsi # &vector1
-    callxt glmc_scale
-.endm
+function scale
+scale: # receives * model, float x esi[unconventional for optimization], float y edx[unconventional for optimization]
+    endbr64
+    SCALE_STACK = 24
+    subq $SCALE_STACK, %rsp # 0() vector(16 ints) + 8 alignment
 
-.macro rotate x0, y0, angle # center of rotation is in (x0, y0), "angle" is multiplied with PI
-    leaq 16(%rsp), %rdi # &model
-    #
+    # movq %rdi, %rdi # * model
+    # movl %esi, %esi # float x
+    # movl %edx, %edx # float y
+
+    # movq %rdi, %rdi # &model
+    # axis & factor
+    movl %esi, 0(%rsp) # vector[0] = x
+    movl %edx, 4(%rsp) # vector[1] = y
+    movl $0, 8(%rsp) # vector[2] = z
+    movl $0, 12(%rsp) # vector[3]
+    leaq 0(%rsp), %rsi # &vector
+    callxt glmc_scale
+
+    addq $SCALE_STACK, %rsp
+    ret
+
+function rotate
+rotate: # receives * model, int x0, int y0, float angle (factor) ecx[unconventional for optimization] # center of rotation is in (x0, y0), "angle" is multiplied with PI
+    endbr64
+    ROTATE_STACK = 40
+    subq $ROTATE_STACK, %rsp # 2 * vec16 + 8 alignment
+
+    # movq %rdi, %rdi # model
+    # movl %esi, %esi # x0
+    # movl %edx, %edx # y0
+    # movl %ecx, %ecx # angle/factor
+    # 0() vector1, 16() vector2
+
+    # movq %rdi, %rdi # model
     # centralize rotation
-    movl $\x0, 0+80(%rsp) # vector1[0] = x
-    movl $\y0, 4+80(%rsp) # vector1[1] = y
-    movl $0, 8+80(%rsp) # vector1[2] = z
-    movl $0, 12+80(%rsp) # vector1[3]
-    cvtdq2ps 80(%rsp), %xmm0 # vector1 -> floats
-    movaps %xmm0, 80(%rsp) # floats -> vector1
-    leaq 80(%rsp), %rsi # &vector1
-    #
+    movl %esi, 0(%rsp) # vector1[0] = x
+    movl %edx, 4(%rsp) # vector1[1] = y
+    movl $0, 8(%rsp) # vector1[2] = z
+    movl $0, 12(%rsp) # vector1[3]
+    cvtdq2ps 0(%rsp), %xmm0 # vector1 -> floats
+    movaps %xmm0, 0(%rsp) # floats -> vector1
+    leaq 0(%rsp), %rsi # &vector1
     # rotation angle
     movss 12+FLOATS(%rip), %xmm0 # pi
-    movss \angle, %xmm1 # a
+    movd %ecx, %xmm1 # a
     mulss %xmm1, %xmm0 # xmm0 = xmm1 * xmm0 = a * pi
-    #
     # axis = always z
-    movl $0, 0+96(%rsp) # vector2[0] = x
-    movl $0, 4+96(%rsp) # vector2[1] = y
-    movl $1, 8+96(%rsp) # vector2[2] = z
-    movl $0, 12+96(%rsp) # vector2[3]
-    cvtdq2ps 96(%rsp), %xmm1 # vector2 -> floats
-    movaps %xmm1, 96(%rsp) # floats -> vector2
-    leaq 96(%rsp), %rdx # &vector2
+    movl $0, 0+16(%rsp) # vector2[0] = x
+    movl $0, 4+16(%rsp) # vector2[1] = y
+    movl $1, 8+16(%rsp) # vector2[2] = z
+    movl $0, 12+16(%rsp) # vector2[3]
+    cvtdq2ps 16(%rsp), %xmm1 # vector2 -> floats
+    movaps %xmm1, 16(%rsp) # floats -> vector2
+    leaq 16(%rsp), %rdx # &vector2
     #
     callxt glmc_rotate_at
-.endm
+
+    addq $ROTATE_STACK, %rsp
+    ret
 
 .macro translate x, y
     leaq 16(%rsp), %rdi # &model
@@ -1780,10 +1799,17 @@ createObjects:
     // two additional vectors for transformations are available: 80() vec4 and 96() vec4
     // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
 
-    # x, y
-    scale $0x40000000 $0x40000000 # // 2.f 2.f
-    # x0, y0, angle
-    rotate WIDTH/2 HEIGHT/2 20+FLOATS(%rip)
+    leaq 16(%rsp), %rdi # &model
+    movl $0x40000000, %esi # 2.f
+    movl $0x40000000, %edx # 2.f
+    call scale
+
+    leaq 16(%rsp), %rdi # void* model
+    movl $WIDTH/2, %esi
+    movl $HEIGHT/2, %edx
+    movl 20+FLOATS(%rip), %ecx
+    call rotate
+
     # x, y
     translate -270 200
 
@@ -1792,18 +1818,11 @@ createObjects:
     movl $0, %edx # int index
     movq $0x00000000, %rcx # swapped[long{x, y} = {0, 0}] due to endianess -> {y, x}
     tuple WIDTH HEIGHT r8d r8
-    # movl $HEIGHT, %r8d
-    # shlq $32, %r8 # move h to high bits (to left)
-    # orq $WIDTH, %r8 # move w to low bits (to right)
-    # movq r8, %r8 # swapped[long{w, h}] -> {h, w}
     movl $1, %r9d # bool/int clip
     call makeImage
 
     resetModel
 
-    # index, color, x0, y0, x1, y1, w
-    # makeLine 1 COLOR_LINE 5 45 WIDTH-5 45 75
-    # int index, int color, long{x0, y0}, long{x1, y1}, int w
     movl $1, %edi
     movl $COLOR_LINE, %esi
     tuple 5 45 edx rdx
@@ -1816,8 +1835,7 @@ createObjects:
     movl $50, %edi
     movl $50, %esi
     call adjustFont
-    #
-    # void* model, void* text, int color, int index, long{x, y}, long{w, h}
+
     leaq 16(%rsp), %rdi
     leaq TEXT1(%rip), %rsi
     movl $COLOR_TEXT, %edx
@@ -1826,10 +1844,9 @@ createObjects:
     tuple 10 -5 r8d r8
     tuple WIDTH-20 100 r9d r9
     call makeText
-    # makeText TEXT1 COLOR_TEXT 2 10 -5 WIDTH-20 100
 
-    # index, color, x0, y0, x1, y1, w
-    # makeLine 3 COLOR_LINE 5 460 WIDTH-5 460 75
+    resetModel
+
     movl $3, %edi
     movl $COLOR_LINE, %esi
     tuple 5 460 edx rdx
@@ -1837,11 +1854,12 @@ createObjects:
     movl $75, %r8d
     call makeLine
 
+    resetModel
+
     movl $40, %edi
     movl $50, %esi
     call adjustFont
-    # text, color, index, x, y, w, h
-    # makeText TEXT2 COLOR_TEXT 4 10 410 WIDTH-20 100
+
     leaq 16(%rsp), %rdi
     leaq TEXT2(%rip), %rsi
     movl $COLOR_TEXT, %edx
