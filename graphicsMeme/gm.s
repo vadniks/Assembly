@@ -32,6 +32,9 @@
 // glslangValidator -G line.vert -o line.vert.spv
 // glslangValidator -G line.frag -o line.frag.spv
 // glslangValidator -G general.comp -o general.comp.spv
+//
+// currently fully works only on nvidia discrete
+// __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ./gm
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
@@ -461,34 +464,23 @@ bootstrapCompute:
 
     //
 
-    movl $0x0de1, %edi # GL_TEXTURE_2D
+    movl $0x9100, %edi # GL_TEXTURE_2D_MULTISAMPLE
     movl $1, %esi
     leaq COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %rdx # &gCompute.texture
     callxt glCreateTextures
     movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %eax # gCompute.texture
     assert
 
-    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edi # gPostprocessingFbo.texture
-    movl $0x2801, %esi # GL_TEXTURE_MIN_FILTER
-    movl $0x2601, %edx # GL_LINEAR
-    callxt glTextureParameteri
-
-    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edi # gPostprocessingFbo.texture
-    movl $0x2800, %esi # GL_TEXTURE_MAG_FILTER
-    movl $0x2601, %edx # GL_LINEAR
-    callxt glTextureParameteri
-
-    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edi # gPostprocessingFbo.texture
-    movl $0x84fe, %esi # GL_TEXTURE_MAX_ANISOTROPY_EXT
-    movss gMaxAnisotropy(%rip), %xmm0
-    callxt glTextureParameterf
-
     movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edi # gCompute.texture
-    movl $1, %esi
+    movl $4, %esi
     movl $0x8058, %edx # GL_RGBA8
     movl $WIDTH, %ecx
     movl $HEIGHT, %r8d
-    callxt glTextureStorage2D
+    movl $1, %r9d # GL_TRUE
+    callxt glTextureStorage2DMultisample
+
+    movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
+    callxt glUseProgram
 
     xorl %edi, %edi
     movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %esi # gCompute.texture
@@ -501,15 +493,8 @@ bootstrapCompute:
     callxt glBindImageTexture
     addq $16, %rsp # free stack
 
-    //
-
-    movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
-    xorl %esi, %esi
-    movl $1, %edx
-    movl $WIDTH, 0+0(%rsp) # vector[0]
-    movl $HEIGHT, 0+4(%rsp) # vector[1]
-    leaq 0(%rsp), %rcx # &vector
-    callxt glProgramUniform2iv
+    xorl %edi, %edi
+    callxt glUseProgram
 
     //
 
@@ -521,24 +506,36 @@ runCompute:
     endbr64
     subq $8, %rsp
 
+    //
+
     movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
     callxt glUseProgram
 
-    //
-
-    movl $WIDTH, %edi
-    movl $HEIGHT, %esi
+    XWIDTH = (WIDTH + 7) / 8
+    movl $XWIDTH, %edi
+    XHEIGHT = (HEIGHT + 7) / 8
+    movl $XHEIGHT, %esi
     movl $1, %edx
     callxt glDispatchCompute
 
-    movl $0x20, %edi # GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
-    orl $0x2000, %edi # GL_SHADER_STORAGE_BARRIER_BIT
+    movl $0x400, %edi # GL_FRAMEBUFFER_BARRIER_BIT
     callxt glMemoryBarrier
 
-    //
+    xorl %edi, %edi
+    xorl %esi, %esi
+    xorl %edx, %edx
+    xorl %ecx, %ecx
+    xorl %r8d, %r8d
+    movl $0x88b9, %r9d # GL_WRITE_ONLY
+    pushq $0 # // not 8th - alignment
+    pushq $0x8058 # // 7th, GL_RGBA8
+    callxt glBindImageTexture
+    addq $16, %rsp # free stack
 
     xorl %edi, %edi
     callxt glUseProgram
+
+    //
 
     addq $8, %rsp
     ret
@@ -1262,21 +1259,13 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 function render
 render:
     endbr64
-    subq $8, %rsp # stack alignment and temp variable
+    subq $24, %rsp # stack alignment and temp variable
 
     movl $0x8ca9, %edi # GL_DRAW_FRAMEBUFFER
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %esi # gMsaaFbo.id
     callxt glBindFramebuffer
 
-    //
-
-    movl $COLOR_BACKGROUND, %edi
-    call clearColor
-
-    movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
-    callxt glClear
-
-    //
+    // skip clearing the color buffer intentionally (glClearColor, glClear(GL_COLOR_BUFFER_BIT)) so to preserve the background texture inside msaa framebuffer
 
     movl $0, (%rsp) # counter = 0
 .Lrender.loop:
@@ -1315,7 +1304,7 @@ render:
     leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
     call renderTexquad
 
-    addq $8, %rsp
+    addq $24, %rsp
     ret
 
 function createUbo
@@ -1384,23 +1373,6 @@ createFbos:
 
     // msaa
 
-    movl $0x9100, %edi # GL_TEXTURE_2D_MULTISAMPLE
-    movl $1, %esi
-    leaq FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %rdx # &gMsaaFbo.texture
-    callxt glCreateTextures
-    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
-    assert
-
-    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.texture
-    movl $4, %esi
-    movl $0x8058, %edx # GL_RGBA8
-    movl $WIDTH, %ecx
-    movl $HEIGHT, %r8d
-    movl $1, %r9d # GL_TRUE
-    callxt glTextureStorage2DMultisample
-
-    //
-
     movl $1, %edi
     leaq FBO_ID_OFFSET+gMsaaFbo(%rip), %rsi # &gMsaaFbo.id
     callxt glCreateFramebuffers
@@ -1409,7 +1381,7 @@ createFbos:
 
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
-    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edx # gMsaaFbo.texture
+    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edx # gCompute.texture !! the texture is created outside of fbos, inside the gMsaaFbo.texture there's zero, so deleteTexture does nothing
     xorl %ecx, %ecx
     callxt glNamedFramebufferTexture
 
@@ -1785,6 +1757,8 @@ createObjects:
     //
 
     call bootstrapCompute
+    call runCompute # // create background texture for msaa framebuffer
+
     call createUbo
     call createFbos
 
@@ -1980,7 +1954,6 @@ loop: # receives SDL_Window*
     //
 
     call createObjects
-    call runCompute
 
 .Lloop.infiniteLoop:
     callxt SDL_GetTicks

@@ -4,18 +4,21 @@
 
 #version 460 core
 
-layout(binding = 0, rgba8) uniform image2D uTexture;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(location = 0) uniform ivec2 uSize;
+layout(rgba8, binding = 0) uniform writeonly image2DMS uTexture;
 
 void main() {
     const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (pixel.x >= uSize.x || pixel.y >= uSize.y) return;
+    const ivec2 size = imageSize(uTexture);
+    if (any(greaterThanEqual(pixel, size))) return;
 
     const int cellSize = 8;
-    const ivec2 cellIndices = ivec2(floor(pixel.x / cellSize), floor(pixel.y / cellSize));
-    const bool black = (cellIndices.x + cellIndices.y) % 2 == 0;
+    const ivec2 cell = ivec2(floor(pixel.x / cellSize), floor(pixel.y / cellSize));
+    const bool black = (cell.x + cell.y) % 2 == 0;
     const vec4 color = black ? vec4(0.8, 0.8, 0.8, 1.0) : vec4(0.9, 0.9, 0.9, 1.0);
 
-    imageStore(uTexture, pixel, color);
+    const int samples = imageSamples(uTexture);
+    for (int s = 0; s < samples; s++)
+        imageStore(uTexture, pixel, s, color);
 }
