@@ -1775,12 +1775,14 @@ createObjects:
     movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
     movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
 
-    // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
+    // matrices multiplication mechanics gives us the only order to follow: scale then rotate then translate
 
 .macro resetModel
     leaq (%rsp), %rdi # &model
     callxt glmc_mat4_identity
 .endm
+
+///////////////////////////////// THE ACTUAL PLAYGROUND/CANVAS
 
     leaq (%rsp), %rdi # &model
     movl $0x40000000, %esi # 2.f
@@ -1854,6 +1856,7 @@ createObjects:
     tuple WIDTH-20 100 r9d r9
     call makeText
 
+///////////////////////////////// THE END
     //
 
     addq $CREATE_OBJECTS_STACK, %rsp
