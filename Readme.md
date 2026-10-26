@@ -1,5 +1,5 @@
 
-# x86-64 Linux Assembly challenges
+# x86-64 Linux Assembly Challenges
 What-if/Why-the-****-no/I-can-I-will series!
 
 ## Voices-Xen
