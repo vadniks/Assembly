@@ -1,5 +1,5 @@
 
-# x86-64 Linux Assembly (AT&T syntax) challenges
+# x86-64 Linux Assembly challenges
 What-if/Why-the-****-no/I-can-I-will series!
 
 ## Voices-Xen
