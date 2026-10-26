@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
-// GM/gm/gm.s/gm.S - Graphics meme challenge:
+// GM/gm/gm.s/gm.S/Meme Factory - Graphics meme challenge:
 //     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
 //     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
 //     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
