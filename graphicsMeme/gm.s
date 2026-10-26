@@ -33,7 +33,7 @@
 // glslangValidator -G line.frag -o line.frag.spv
 // glslangValidator -G general.comp -o general.comp.spv
 //
-// currently fully works only on nvidia discrete
+// currently fully works only on nvidia discrete, background chess-like multisampled texture may not get rendered on some gpus, gota deal with this, oh... :(
 // __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ./gm
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -485,7 +485,7 @@ bootstrapCompute:
     xorl %edi, %edi
     movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %esi # gCompute.texture
     xorl %edx, %edx
-    xorl %ecx, %ecx # GL_FALSE
+    movl $1, %ecx # GL_TRUE
     xorl %r8d, %r8d
     movl $0x88b9, %r9d # GL_WRITE_ONLY
     pushq $0 # // not 8th - alignment
@@ -511,9 +511,9 @@ runCompute:
     movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
     callxt glUseProgram
 
-    XWIDTH = (WIDTH + 7) / 8
+    XWIDTH = WIDTH # // (WIDTH + 7) / 8
     movl $XWIDTH, %edi
-    XHEIGHT = (HEIGHT + 7) / 8
+    XHEIGHT = HEIGHT # // (HEIGHT + 7) / 8
     movl $XHEIGHT, %esi
     movl $1, %edx
     callxt glDispatchCompute
@@ -524,7 +524,7 @@ runCompute:
     xorl %edi, %edi
     xorl %esi, %esi
     xorl %edx, %edx
-    xorl %ecx, %ecx
+    movl $1, %ecx
     xorl %r8d, %r8d
     movl $0x88b9, %r9d # GL_WRITE_ONLY
     pushq $0 # // not 8th - alignment
@@ -2024,7 +2024,11 @@ function debugCallback
 debugCallback: # recieves many things, we care only about char* message 6h argument - r9
     endbr64
     # ignore misalignment
+
+    andl $0x826B, %ecx # GL_DEBUG_SEVERITY_NOTIFICATION
+    jnz 1f # // ignore insignificant messages (buffer detailed info, usage hints, etc)
     xprint DEBUG_S r9 0 # // push/pop stack - makes it temporary aligned so we don't have to do it here
+1:
     ret
 
 .global main
