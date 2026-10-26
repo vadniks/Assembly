@@ -3,12 +3,12 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
 //     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
@@ -33,7 +33,7 @@
 // glslangValidator -G line.frag -o line.frag.spv
 // glslangValidator -G general.comp -o general.comp.spv
 //
-// currently fully works only on nvidia discrete, background chess-like multisampled texture may not get rendered on some gpus, gota deal with this, oh... :(
+// currently fully works only on nvidia discrete, background chess-like multisampled texture may not get rendered on some gpus, gotta deal with this, oh... :(
 // __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ./gm
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -316,7 +316,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-    
+
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -363,7 +363,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-    
+
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
