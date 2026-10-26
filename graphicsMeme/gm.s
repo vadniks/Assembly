@@ -3,12 +3,12 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
 //     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
@@ -316,7 +316,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-
+    
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -363,7 +363,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-
+    
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1510,11 +1510,6 @@ adjustFont: # receives int ptsize, int dpi
     addq $8, %rsp
     ret
 
-.macro resetModel
-    leaq 16(%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-.endm
-
 function makeImage # // image can yield nullable value via leaq and in that case this creates an empty texquad (intended for foreign textures or stenciling)
 makeImage: # receives void* model, nullable void* image, int index, long{x, y}, long{w, h}, bool/int clip, r10[unconventional for optimization] - nullable int foreignTexture
     endbr64
@@ -1751,7 +1746,7 @@ translate: # receives * model, int x, int y
 function createObjects
 createObjects:
     endbr64
-    CREATE_OBJECTS_STACK = 120 # // 8 alignment and SDL_Surface* 0(%rsp) + padding + 4 vectors of 4 floats of 4 bytes each = 8 + 8 + 4^3 16(%rsp) model + 80() vec4 + 96() vec4 + alignment
+    CREATE_OBJECTS_STACK = 72 # // 4 vectors of 4 floats of 4 bytes each = 4^3=64 0(%rsp) model + 8 alignment
     subq $CREATE_OBJECTS_STACK, %rsp
 
     //
@@ -1762,7 +1757,7 @@ createObjects:
     call createUbo
     call createFbos
 
-    leaq 16(%rsp), %rdi # &model
+    leaq (%rsp), %rdi # &model
     callxt glmc_mat4_identity
 
     //
@@ -1774,33 +1769,37 @@ createObjects:
 
     leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
     xorq %rsi, %rsi
-    leaq 16(%rsp), %rdx # &model
+    leaq (%rsp), %rdx # &model
     call createTexquad
 
     movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
     movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
 
-    // two additional vectors for transformations are available: 80() vec4 and 96() vec4
     // due to importance of matrix multiplication and the fact that first matrix being multiplied first - the order is reversed - this gives us: scale, rotate, translate order
 
-    leaq 16(%rsp), %rdi # &model
+.macro resetModel
+    leaq (%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+.endm
+
+    leaq (%rsp), %rdi # &model
     movl $0x40000000, %esi # 2.f
     movl $0x40000000, %edx # 2.f
     call scale
 
-    leaq 16(%rsp), %rdi # void* model
+    leaq (%rsp), %rdi # void* model
     movl $WIDTH/2, %esi
     movl $HEIGHT/2, %edx
     movl 20+FLOATS(%rip), %ecx
     call rotate
 
     # translate -270 200
-    leaq 16(%rsp), %rdi # void* model
+    leaq (%rsp), %rdi # void* model
     movl $-270, %esi
     movl $200, %edx
     call translate
 
-    leaq 16(%rsp), %rdi # void* model
+    leaq (%rsp), %rdi # void* model
     leaq IMAGE_NAME(%rip), %rsi # void* image
     movl $0, %edx # int index
     movq $0x00000000, %rcx # swapped[long{x, y} = {0, 0}] due to endianess -> {y, x}
@@ -1823,7 +1822,7 @@ createObjects:
     movl $50, %esi
     call adjustFont
 
-    leaq 16(%rsp), %rdi
+    leaq (%rsp), %rdi
     leaq TEXT1(%rip), %rsi
     movl $COLOR_TEXT, %edx
     movl $2, %ecx
@@ -1847,7 +1846,7 @@ createObjects:
     movl $50, %esi
     call adjustFont
 
-    leaq 16(%rsp), %rdi
+    leaq (%rsp), %rdi
     leaq TEXT2(%rip), %rsi
     movl $COLOR_TEXT, %edx
     movl $4, %ecx
