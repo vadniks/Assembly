@@ -8,6 +8,8 @@ It had been just a joke initially, then it became a methaphor about virtualizati
 ## GraphicsMeme/MemeFactory
 Assembly, PIE, shared libraries, modern OpenGL, graphics, SIMD, linear algebra - just to make memes! The hardcore way!
 ![Meme](https://github.com/vadniks/Assembly/blob/master/graphicsMeme/results/egmout2.png)
+![Meme](https://github.com/vadniks/Assembly/blob/master/graphicsMeme/results/ggmout2.png)
+![Meme](https://github.com/vadniks/Assembly/blob/master/graphicsMeme/results/hgmout2.png)
 
 ### License
 GNU GPLv3.0-ONLY

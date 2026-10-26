@@ -3,12 +3,12 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S/Meme Factory - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
 //     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
@@ -39,10 +39,10 @@
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
 
-WIDTH = 1024
-HEIGHT = 500
+WIDTH = 640
+HEIGHT = 640
 UPDATE_PERIOD = 16
-OBJECTS = 5
+OBJECTS = 6
 
 # rgba bytes (little endian in binary, big endian in code, assembler/compiler converts them automatically)
 COLOR_BACKGROUND = 0xffffffff
@@ -92,13 +92,16 @@ constant ENTRY_POINT
 ENTRY_POINT: .asciz "main"
 
 constant TEXT1
-TEXT1: .asciz "Ya know, I'm smth of a psychologist myself!"
+TEXT1: .asciz "What do engineers do for fun?"
 
 constant TEXT2
-TEXT2: .asciz "WHEN AN ENGINEER TREATS EVERYONE AS ABSTRACT VULNERABLE SYSTEMS"
+TEXT2: .asciz "Assembly, OpenGL, Linear Algebra, and a whole pile of pure suffering"
+
+constant TEXT3
+TEXT3: .asciz "MEMES"
 
 constant IMAGE_NAME
-IMAGE_NAME: .asciz "dedrsfa.jpg"
+IMAGE_NAME: .asciz "rtgdfe.jpg"
 
 constant TEXQUAD_VERTEX
 TEXQUAD_VERTEX: .incbin "texquad.vert.spv"
@@ -316,7 +319,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-    
+
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -363,7 +366,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-    
+
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1785,75 +1788,64 @@ createObjects:
 ///////////////////////////////// THE ACTUAL PLAYGROUND/CANVAS
 
     leaq (%rsp), %rdi # &model
-    movl $0x40000000, %esi # 2.f
-    movl $0x40000000, %edx # 2.f
-    call scale
-
-    leaq (%rsp), %rdi # void* model
-    movl $WIDTH/2, %esi
-    movl $HEIGHT/2, %edx
-    movl 20+FLOATS(%rip), %ecx
-    call rotate
-
-    # translate -270 200
-    leaq (%rsp), %rdi # void* model
-    movl $-270, %esi
-    movl $200, %edx
-    call translate
-
-    leaq (%rsp), %rdi # void* model
-    leaq IMAGE_NAME(%rip), %rsi # void* image
-    movl $0, %edx # int index
-    movq $0x00000000, %rcx # swapped[long{x, y} = {0, 0}] due to endianess -> {y, x}
-    tuple WIDTH HEIGHT r8d r8
-    movl $1, %r9d # bool/int clip
+    leaq IMAGE_NAME(%rip), %rsi
+    xorl %edx, %edx # index
+    xorl %ecx, %ecx # {x, y}
+    tuple WIDTH HEIGHT-70 r8d r8
+    xorl %r9d, %r9d # clip
     call makeImage
 
-    resetModel
-
-    movl $1, %edi
+    movl $1, %edi # index
     movl $COLOR_LINE, %esi
-    tuple 5 45 edx rdx
-    tuple WIDTH-5 45 ecx rcx
-    movl $75, %r8d
+    tuple 0 605 edx rdx # // {x0, y0}
+    tuple WIDTH 605 ecx rcx # // {x1, y1}
+    movl $70, %r8d # w
     call makeLine
 
-    resetModel
-
-    movl $50, %edi
-    movl $50, %esi
+    movl $50, %edi # pointSize
+    movl $50, %esi # dpi
     call adjustFont
 
-    leaq (%rsp), %rdi
+    leaq (%rsp), %rdi # &model
     leaq TEXT1(%rip), %rsi
-    movl $COLOR_TEXT, %edx
-    movl $2, %ecx
-    xorq %r8, %r8
-    tuple 10 -5 r8d r8
-    tuple WIDTH-20 100 r9d r9
+    movl $0xbababaff, %edx
+    movl $2, %ecx # index
+    tuple 5 570 r8d r8 # // {x, y}
+    tuple WIDTH-10 70 r9d r9 # // {w, h}
+    call makeText
+
+    leaq (%rsp), %rdi # &model
+    movl $350, %esi # // x0
+    movl $35, %edx # // y0
+    movl $0x3e333333, %ecx # (a=0.175f) * PI_radians
+    call rotate
+
+    movl $20, %edi # pointSize
+    movl $100, %esi # dpi
+    call adjustFont
+
+    leaq (%rsp), %rdi # &model
+    leaq TEXT2(%rip), %rsi
+    movl $0x050505ff, %edx # rgba color
+    movl $3, %ecx # index
+    tuple 190 385 r8d r8 # // {x, y}
+    tuple 540 50 r9d r9 # // {w, h}
     call makeText
 
     resetModel
 
-    movl $3, %edi
-    movl $COLOR_LINE, %esi
-    tuple 5 460 edx rdx
-    tuple WIDTH-5 460 ecx rcx
-    movl $75, %r8d
-    call makeLine
+    leaq (%rsp), %rdi # &model
+    movl $75, %esi # // x0
+    movl $40, %edx # // y0
+    movl $0xbc23d70a, %ecx # (a=-0.01f) * PI_radians
+    call rotate
 
-    resetModel
-
-    movl $40, %edi
-    movl $50, %esi
-    call adjustFont
-
-    leaq (%rsp), %rdi
-    leaq TEXT2(%rip), %rsi
-    movl $COLOR_TEXT, %edx
-    movl $4, %ecx
-    tuple 10 410 r8d r8
-    tuple WIDTH-20 100 r9d r9
+    leaq (%rsp), %rdi # &model
+    leaq TEXT3(%rip), %rsi
+    movl $0xefefefff, %edx # rgba color
+    movl $4, %ecx # index
+    tuple 345 350 r8d r8 # // {x, y}
+    tuple 150 80 r9d r9 # // {w, h}
     call makeText
 
 ///////////////////////////////// THE END
