@@ -1272,7 +1272,7 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 
     testl %esi, %esi # if deleting then skip
     jz .LprocessObject.skipStencil
-    # only works for one eraser object but erases from every other (if on top)
+    #
     movl OBJECT_TYPE_OFFSET(%rdi), %eax # object->type
     andl $TYPE_ERASER_BIT, %eax # type & eraser_bit
     cmpl $TYPE_ERASER_BIT, %eax # ... == eraser_bit
@@ -1348,14 +1348,18 @@ render:
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %esi # gMsaaFbo.id
     callxt glBindFramebuffer
 
-    // TODO: testing
     movl $COLOR_BACKGROUND, %edi
     call clearColor
     #
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
     orl $0x400, %edi # GL_STENCIL_BUFFER_BIT
     callxt glClear
-    // skip clearing the color buffer intentionally (glClearColor, glClear(GL_COLOR_BUFFER_BIT)) to preserve the background texture inside msaa framebuffer
+
+    # TODO: copy computed texture's contents to fbo1's texture
+    # 
+    # TODO: computed texture is not currently rendered anywhere at all
+    # 
+    callxt glCopyImageSubData
 
     movl $0, (%rsp) # counter = 0
 .Lrender.loop:
@@ -1469,9 +1473,24 @@ createFbos:
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.id
     assert
 
+    movl $0x9100, %edi # GL_TEXTURE_2D_MULTISAMPLE
+    movl $1, %esi
+    leaq FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %rdx # &gMsaaFbo.texture
+    callxt glCreateTextures
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.texture
+    assert
+
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.texture
+    movl $4, %esi
+    movl $0x8058, %edx # GL_RGBA8
+    movl $WIDTH, %ecx
+    movl $HEIGHT, %r8d
+    movl $1, %r9d # GL_TRUE
+    callxt glTextureStorage2DMultisample
+
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8ce0, %esi # GL_COLOR_ATTACHMENT0
-    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edx # gCompute.texture !! the texture is created outside of fbos, inside the gMsaaFbo.texture there's zero, so deleteTexture does nothing
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %edx # gMsaaFbo.texture
     xorl %ecx, %ecx
     callxt glNamedFramebufferTexture
 
@@ -1688,24 +1707,24 @@ createObjects:
     movl $50, %esi # dpi
     call adjustFont
 
-    leaq (%rsp), %rdi # &model
-    leaq TEXT1(%rip), %rsi
-    movl $0xbababaff, %edx
-    movl $3, %ecx # index
-    tuple 5 570 r8d r8 # // {x, y}
-    tuple WIDTH-10 70 r9d r9 # // {w, h}
-    call makeText
-    # TODO: testing:
     # leaq (%rsp), %rdi # &model
-    # xorq %rsi, %rsi
-    # movl $3, %edx # index
-    # tuple 100 100 ecx rcx # // {x, y}
-    # tuple 100 100 r8d r8 # // {w, h}
-    # xorl %r9d, %r9d # clip
-    # xorl %r10d, %r10d # foreignTexture
-    # call makeImage
-    # movq 24+gObjects(%rip), %rax # gObjects[0]
-    # orl $TYPE_ERASER_BIT, OBJECT_TYPE_OFFSET(%rax) # gObjects[0]->type |= eraser_bit
+    # leaq TEXT1(%rip), %rsi
+    # movl $0xbababaff, %edx
+    # movl $3, %ecx # index
+    # tuple 5 570 r8d r8 # // {x, y}
+    # tuple WIDTH-10 70 r9d r9 # // {w, h}
+    # call makeText
+    # TODO: testing:
+    leaq (%rsp), %rdi # &model
+    xorq %rsi, %rsi
+    movl $3, %edx # index
+    tuple 190 385 ecx rcx # // {x, y}
+    tuple 100 100 r8d r8 # // {w, h}
+    xorl %r9d, %r9d # clip
+    xorl %r10d, %r10d # foreignTexture
+    call makeImage
+    movq 24+gObjects(%rip), %rax # gObjects[0]
+    orl $TYPE_ERASER_BIT, OBJECT_TYPE_OFFSET(%rax) # gObjects[0]->type |= eraser_bit
 
     leaq (%rsp), %rdi # &model
     movl $350, %esi # // x0
