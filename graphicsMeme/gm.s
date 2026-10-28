@@ -10,7 +10,8 @@
 //     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
 //     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
-//     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
+//     texture generation via compute shader, erasing/cutting wholes in the composition via objects, direct storage access, 
+//     precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
 // Inspired by the book "Learn OpenGL - Graphics Programming" by Joey de Vries, big thanks to him, it's a great book!
