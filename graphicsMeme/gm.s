@@ -1208,11 +1208,6 @@ stencil: # receives int mode: eraser=0, target=1; dictates the mode for objects 
 
 .Lstencil.eraser:
 
-    # TODO: testing
-    # movl $0x400, %edi # GL_STENCIL_BUFFER_BIT
-    # orl $0x4000, %edi # GL_COLOR_BUFFER_BIT
-    # callxt glClear
-
     xorl %edi, %edi
     xorl %esi, %esi
     xorl %edx, %edx
@@ -1348,6 +1343,8 @@ render:
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %esi # gMsaaFbo.id
     callxt glBindFramebuffer
 
+    //
+
     movl $COLOR_BACKGROUND, %edi
     call clearColor
     #
@@ -1355,11 +1352,29 @@ render:
     orl $0x400, %edi # GL_STENCIL_BUFFER_BIT
     callxt glClear
 
-    # TODO: copy computed texture's contents to fbo1's texture
-    # 
-    # TODO: computed texture is not currently rendered anywhere at all
-    # 
-    callxt glCopyImageSubData
+    //
+
+    subq $80, %rsp
+    movl COMPUTE_TEXTURE_OFFSET+gCompute(%rip), %edi # gCompute.texture
+    movl $0x9100, %esi # GL_TEXTURE_2D_MULTISAMPLE
+    xorl %edx, %edx
+    xorl %ecx, %ecx
+    xorl %r8d, %r8d
+    xorl %r9d, %r9d
+    movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax
+    movl %eax, 0(%rsp)
+    movl $0x9100, 8(%rsp) # GL_TEXTURE_2D_MULTISAMPLE
+    movl $0, 16(%rsp)
+    movl $0, 24(%rsp)
+    movl $0, 32(%rsp)
+    movl $0, 40(%rsp)
+    movl $WIDTH, 48(%rsp)
+    movl $HEIGHT, 56(%rsp)
+    movl $1, 64(%rsp)
+    callxt glCopyImageSubData # // copy contents of the computed texture to the msaa fbo's texture
+    addq $80, %rsp
+
+    //
 
     movl $0, (%rsp) # counter = 0
 .Lrender.loop:
