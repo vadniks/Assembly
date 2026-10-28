@@ -34,8 +34,17 @@
 // glslangValidator -G line.frag -o line.frag.spv
 // glslangValidator -G general.comp -o general.comp.spv
 //
-// currently fully works only on nvidia discrete, background chess-like multisampled texture may not get rendered on some gpus, gotta deal with this, oh... :(
+// --- NOTICE ---
+// The background chess-like multisampled texture may not get rendered on some gpus:
+// imageSize(image2DMS) and imageStore(image2DMS...) may not work there
+// "This is a known specific bug that has been documented on certain integrated graphics implementations"
+// https://community.intel.com/t/spir-v-glsl-imagesize-returns-0-on-opengl-4-6-with-intel-uhd-graphics/132973/7
+//
+// The current implementation works fine on Nvidia:
 // __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ./gm
+// or
+// DRI_PRIME=1 ./gm
+// to switch to the discrete gpu (Linux only obviously)
 
 /////////////////////////////////////////////////////////////////////////////////
 .section .rodata
