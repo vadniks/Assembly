@@ -3,14 +3,14 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S/Meme Factory - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
-//     texture generation via compute shader, erasing/cutting wholes in the composition via objects, direct storage access, 
+//     texture generation via compute shader, erasing/cutting wholes in the composition via objects, direct storage access,
 //     precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
@@ -334,7 +334,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-    
+
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -381,7 +381,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-    
+
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1652,8 +1652,6 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     addq $8, %rsp # stack alignment
     ret
 
-// TODO: duplicate the computed texture and then copy/blit its contets into fb1's texture each frame after clearing
-
 function createObjects
 createObjects:
     endbr64
@@ -1732,24 +1730,13 @@ createObjects:
     movl $50, %esi # dpi
     call adjustFont
 
-    # leaq (%rsp), %rdi # &model
-    # leaq TEXT1(%rip), %rsi
-    # movl $0xbababaff, %edx
-    # movl $3, %ecx # index
-    # tuple 5 570 r8d r8 # // {x, y}
-    # tuple WIDTH-10 70 r9d r9 # // {w, h}
-    # call makeText
-    # TODO: testing:
     leaq (%rsp), %rdi # &model
-    xorq %rsi, %rsi
-    movl $3, %edx # index
-    tuple 190 385 ecx rcx # // {x, y}
-    tuple 100 100 r8d r8 # // {w, h}
-    xorl %r9d, %r9d # clip
-    xorl %r10d, %r10d # foreignTexture
-    call makeImage
-    movq 24+gObjects(%rip), %rax # gObjects[0]
-    orl $TYPE_ERASER_BIT, OBJECT_TYPE_OFFSET(%rax) # gObjects[0]->type |= eraser_bit
+    leaq TEXT1(%rip), %rsi
+    movl $0xbababaff, %edx
+    movl $3, %ecx # index
+    tuple 5 570 r8d r8 # // {x, y}
+    tuple WIDTH-10 70 r9d r9 # // {w, h}
+    call makeText
 
     leaq (%rsp), %rdi # &model
     movl $350, %esi # // x0
