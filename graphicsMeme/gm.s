@@ -526,7 +526,7 @@ runCompute:
     movl $1, %edx
     callxt glDispatchCompute
 
-    movl $0x400, %edi # GL_FRAMEBUFFER_BARRIER_BIT
+    movl $0x100, %edi # GL_TEXTURE_UPDATE_BARRIER_BIT
     callxt glMemoryBarrier
 
     xorl %edi, %edi
