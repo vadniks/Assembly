@@ -3,12 +3,12 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S/Meme Factory - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
 //     texture generation via compute shader, direct storage access, precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
@@ -142,6 +142,10 @@ variable gMaxAnisotropy 4 # // float
 
 # typedef enum : int {TYPE_TEXQUAD, TYPE_LINE} Type; // size = 4
 
+TYPE_TEXQUAD = 0
+TYPE_LINE = 1
+TYPE_ERASER_BIT = 0x80 # // object.type |= eraser_bit then (object.type & eraser_bit) [== eraser_bit] then object.type &= ~eraser_bit
+
 # typedef struct {
 #     Type type;
 #     GLuint vao, program;
@@ -192,13 +196,14 @@ LINE_WIDTH_OFFSET = 32
 variable gUbo 4 # // uint
 
 # typedef struct {
-#     GLuint id, texture;
-#     <long padding>;
-# } Fbo; // size = 2 * 4 + 8 padding = 16
+#     GLuint id, texture, rbo;
+#     <int padding>;
+# } Fbo; // size = 3 * 4 + 4 padding = 16
 
 FBO_SIZE = 16
 FBO_ID_OFFSET = 0
 FBO_TEXTURE_OFFSET = 4
+FBO_RBO_OFFSET = 8
 
 variable gMsaaFbo FBO_SIZE # // Fbo
 variable gPostprocessingFbo FBO_SIZE # // Fbo
@@ -319,7 +324,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-
+    
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -366,7 +371,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-
+    
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -514,7 +519,7 @@ runCompute:
     movl COMPUTE_PROGRAM_OFFSET+gCompute(%rip), %edi # gCompute.program
     callxt glUseProgram
 
-    XWIDTH = WIDTH # // (WIDTH + 7) / 8
+    XWIDTH = WIDTH # // (WIDTH + 7) / 8 - optimization
     movl $XWIDTH, %edi
     XHEIGHT = HEIGHT # // (HEIGHT + 7) / 8
     movl $XHEIGHT, %esi
@@ -1188,6 +1193,68 @@ removeLine: # receives Line* line
     addq $8, %rsp
     ret
 
+function stencil
+stencil: # receives int mode: eraser=0, target=1; dictates the mode for objects to be processed in render()->processObject()
+    endbr64
+    subq $8, %rsp
+
+    cmpl $0, %edi
+    je .Lstencil.eraser
+    cmpl $1, %edi
+    je .Lstencil.target
+
+    xorl %eax, %eax
+    assert
+
+.Lstencil.eraser:
+
+    # TODO: testing
+    # movl $0x400, %edi # GL_STENCIL_BUFFER_BIT
+    # orl $0x4000, %edi # GL_COLOR_BUFFER_BIT
+    # callxt glClear
+
+    xorl %edi, %edi
+    xorl %esi, %esi
+    xorl %edx, %edx
+    xorl %ecx, %ecx
+    callxt glColorMask
+
+    //
+
+    movl $0x0207, %edi # GL_ALWAYS
+    movl $1, %esi
+    movl $0xff, %edx
+    callxt glStencilFunc
+
+    movl $0xff, %edi
+    callxt glStencilMask
+
+    jmp .Lstencil.end
+    // draw eraser - a shape that would substract from the target
+
+.Lstencil.target:
+
+    movl $1, %edi
+    movl $1, %esi
+    movl $1, %edx
+    movl $1, %ecx
+    callxt glColorMask
+
+    movl $0x0205, %edi # GL_NOTEQUAL
+    movl $1, %esi
+    movl $0xff, %edx
+    callxt glStencilFunc
+
+    xorl %edi, %edi
+    callxt glStencilMask
+
+    // draw the target - from which an eraser-shaped piece would be erased
+
+.Lstencil.end:
+
+    addq $8, %rsp
+    ret
+
 function processObject
 processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, esi)
     endbr64
@@ -1203,10 +1270,24 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
 
     //
 
-    # movq %rdi, %rdi
+    testl %esi, %esi # if deleting then skip
+    jz .LprocessObject.skipStencil
+    # only works for one eraser object but erases from every other (if on top)
     movl OBJECT_TYPE_OFFSET(%rdi), %eax # object->type
+    andl $TYPE_ERASER_BIT, %eax # type & eraser_bit
+    cmpl $TYPE_ERASER_BIT, %eax # ... == eraser_bit
+    #
+    setne %al # // 1 if not equals -> target, not eraser; 0 if equals -> eraser
+    movzbl %al, %edi # eax = whether equeals + zero extend insignificats
+    call stencil
+.LprocessObject.skipStencil:
 
-    cmpl $0, %eax # TYPE_TEXQUAD # TODO: replace with 'and'
+    movq (%rsp), %rdi
+    movl OBJECT_TYPE_OFFSET(%rdi), %eax # object->type
+    andl $0x7f, %eax # discard most insignificat bit (eraser_bit)
+
+    movl 8(%rsp), %esi # renderOrDelete?
+    cmpl $0, %eax # TYPE_TEXQUAD
     je .LprocessObject.texquad
     cmpl $1, %eax # TYPE_LINE
     je .LprocessObject.line
@@ -1252,9 +1333,8 @@ processObject: # receives Object* object (rdi), bool renderOrDelete (4 bytes, es
     jnz .LprocessObject.end.noFree
     movq (%rsp), %rdi # * object
     callxt free
-.LprocessObject.end.noFree:
 
-    //
+.LprocessObject.end.noFree:
 
     addq $PROCESS_OBJECT_STACK, %rsp
     ret
@@ -1268,7 +1348,14 @@ render:
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %esi # gMsaaFbo.id
     callxt glBindFramebuffer
 
-    // skip clearing the color buffer intentionally (glClearColor, glClear(GL_COLOR_BUFFER_BIT)) so to preserve the background texture inside msaa framebuffer
+    // TODO: testing
+    movl $COLOR_BACKGROUND, %edi
+    call clearColor
+    #
+    movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
+    orl $0x400, %edi # GL_STENCIL_BUFFER_BIT
+    callxt glClear
+    // skip clearing the color buffer intentionally (glClearColor, glClear(GL_COLOR_BUFFER_BIT)) to preserve the background texture inside msaa framebuffer
 
     movl $0, (%rsp) # counter = 0
 .Lrender.loop:
@@ -1388,11 +1475,32 @@ createFbos:
     xorl %ecx, %ecx
     callxt glNamedFramebufferTexture
 
+    movl $1, %edi
+    leaq FBO_RBO_OFFSET+gMsaaFbo(%rip), %rsi # &gMsaaFbo.rbo
+    callxt glCreateRenderbuffers
+    movl FBO_RBO_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.rbo
+    assert
+
+    movl FBO_RBO_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.rbo
+    movl $4, %esi
+    movl $0x8d48, %edx # GL_STENCIL_INDEX8
+    movl $WIDTH, %ecx
+    movl $HEIGHT, %r8d
+    callxt glNamedRenderbufferStorageMultisample
+
+    movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
+    movl $0x8d20, %esi # GL_STENCIL_ATTACHMENT
+    movl $0x8d41, %edx # GL_RENDERBUFFER
+    movl FBO_RBO_OFFSET+gMsaaFbo(%rip), %ecx # gMsaaFbo.rbo
+    callxt glNamedFramebufferRenderbuffer
+
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %edi # gMsaaFbo.id
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
-    andl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
-    assert # // result == constant
+    cmpl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
+    sete %al # // set 1 if equals
+    movzbl %al, %eax # zero extend al
+    assert
 
     // postprocessing
 
@@ -1442,8 +1550,10 @@ createFbos:
     movl FBO_ID_OFFSET+gPostprocessingFbo(%rip), %edi # gPostprocessingFbo.id
     movl $0x8d40, %esi # GL_FRAMEBUFFER
     callxt glCheckNamedFramebufferStatus
-    andl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
-    assert # // result == constant
+    cmpl $0x8cd5, %eax # eax == <> ?, GL_FRAMEBUFFER_COMPLETE
+    sete %al # // set 1 if equals
+    movzbl %al, %eax # zero extend al
+    assert
 
     //
 
@@ -1465,6 +1575,10 @@ removeFbos:
     movl $2, %edi
     leaq 0(%rsp), %rsi # &vector
     callxt glDeleteTextures
+
+    movl $1, %edi
+    leaq FBO_RBO_OFFSET+gMsaaFbo(%rip), %rsi # &gMsaaFbo.rbo
+    callxt glDeleteRenderbuffers
 
     movl FBO_ID_OFFSET+gMsaaFbo(%rip), %eax # gMsaaFbo.id
     movl %eax, 0(%rsp) # vector<uint>[0]
@@ -1494,6 +1608,145 @@ togglePostprocessing: # receives bool (4 bytes) onOrOff
     addq $8, %rsp # stack alignment
     ret
 
+// TODO: duplicate the computed texture and then copy/blit its contets into fb1's texture each frame after clearing
+
+function createObjects
+createObjects:
+    endbr64
+    CREATE_OBJECTS_STACK = 72 # // 4 vectors of 4 floats of 4 bytes each = 4^3=64 0(%rsp) model + 8 alignment
+    subq $CREATE_OBJECTS_STACK, %rsp
+
+    //
+
+    call bootstrapCompute
+    call runCompute # // create background texture for msaa framebuffer
+
+    call createUbo
+    call createFbos
+
+    leaq (%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+
+    //
+
+    # everything inside .bss is initialized with zeroes
+    movl $0, OBJECT_TYPE_OFFSET+gPostprocessingTexquad(%rip)
+    movl $WIDTH, TEXQUAD_W_OFFSET+gPostprocessingTexquad(%rip)
+    movl $HEIGHT, TEXQUAD_H_OFFSET+gPostprocessingTexquad(%rip)
+
+    leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
+    xorq %rsi, %rsi
+    leaq (%rsp), %rdx # &model
+    call createTexquad
+
+    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
+    movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
+
+    // matrices multiplication mechanics gives us the only order to follow: scale then rotate then translate
+
+.macro tuple a, b, r32, r64
+    movl $\b, %\r32 # with respect to the endianess
+    shlq $32, %\r64 # move b to high bits (to left)
+    orq $\a, %\r64 # move a to low bits (to right)
+.endm
+
+.macro resetModel
+    leaq (%rsp), %rdi # &model
+    callxt glmc_mat4_identity
+.endm
+
+///////////////////////////////// THE ACTUAL PLAYGROUND/CANVAS
+
+    leaq (%rsp), %rdi # &model
+    xorq %rsi, %rsi
+    xorl %edx, %edx # index
+    tuple 100 100 ecx rcx # // {x, y}
+    tuple 100 100 r8d r8 # // {w, h}
+    xorl %r9d, %r9d # clip
+    xorl %r10d, %r10d # foreignTexture
+    call makeImage
+    movq 0+gObjects(%rip), %rax # gObjects[0]
+    orl $TYPE_ERASER_BIT, OBJECT_TYPE_OFFSET(%rax) # gObjects[0]->type |= eraser_bit
+
+    leaq (%rsp), %rdi # &model
+    leaq IMAGE_NAME(%rip), %rsi
+    movl $1, %edx # index
+    xorl %ecx, %ecx # {x, y}
+    tuple WIDTH HEIGHT-70 r8d r8 # // {w, h}
+    xorl %r9d, %r9d # clip
+    xorl %r10d, %r10d # foreignTexture
+    call makeImage
+
+    movl $2, %edi # index
+    movl $0xff0000ff, %esi
+    tuple 0 605 edx rdx # // {x0, y0}
+    tuple WIDTH 605 ecx rcx # // {x1, y1}
+    movl $70, %r8d # w
+    call makeLine
+
+    movl $50, %edi # pointSize
+    movl $50, %esi # dpi
+    call adjustFont
+
+    leaq (%rsp), %rdi # &model
+    leaq TEXT1(%rip), %rsi
+    movl $0xbababaff, %edx
+    movl $3, %ecx # index
+    tuple 5 570 r8d r8 # // {x, y}
+    tuple WIDTH-10 70 r9d r9 # // {w, h}
+    call makeText
+    # TODO: testing:
+    # leaq (%rsp), %rdi # &model
+    # xorq %rsi, %rsi
+    # movl $3, %edx # index
+    # tuple 100 100 ecx rcx # // {x, y}
+    # tuple 100 100 r8d r8 # // {w, h}
+    # xorl %r9d, %r9d # clip
+    # xorl %r10d, %r10d # foreignTexture
+    # call makeImage
+    # movq 24+gObjects(%rip), %rax # gObjects[0]
+    # orl $TYPE_ERASER_BIT, OBJECT_TYPE_OFFSET(%rax) # gObjects[0]->type |= eraser_bit
+
+    leaq (%rsp), %rdi # &model
+    movl $350, %esi # // x0
+    movl $35, %edx # // y0
+    movl $0x3e333333, %ecx # (a=0.175f) * PI_radians
+    call rotate
+
+    movl $20, %edi # pointSize
+    movl $100, %esi # dpi
+    call adjustFont
+
+    leaq (%rsp), %rdi # &model
+    leaq TEXT2(%rip), %rsi
+    movl $0x050505ff, %edx # rgba color
+    movl $4, %ecx # index
+    tuple 190 385 r8d r8 # // {x, y}
+    tuple 540 50 r9d r9 # // {w, h}
+    call makeText
+
+    resetModel
+
+    leaq (%rsp), %rdi # &model
+    movl $75, %esi # // x0
+    movl $40, %edx # // y0
+    movl $0xbc23d70a, %ecx # (a=-0.01f) * PI_radians
+    call rotate
+
+    leaq (%rsp), %rdi # &model
+    leaq TEXT3(%rip), %rsi
+    movl $0xefefefff, %edx # rgba color
+    movl $5, %ecx # index
+    tuple 345 350 r8d r8 # // {x, y}
+    tuple 150 80 r9d r9 # // {w, h}
+    call makeText
+
+///////////////////////////////// THE END
+    //
+
+    addq $CREATE_OBJECTS_STACK, %rsp
+    ret
+
 function adjustFont
 adjustFont: # receives int ptsize, int dpi
     endbr64
@@ -1514,7 +1767,7 @@ adjustFont: # receives int ptsize, int dpi
     ret
 
 function makeImage # // image can yield nullable value via leaq and in that case this creates an empty texquad (intended for foreign textures or stenciling)
-makeImage: # receives void* model, nullable void* image, int index, long{x, y}, long{w, h}, bool/int clip, r10[unconventional for optimization] - nullable int foreignTexture
+makeImage: # receives void* model, nullable void* image, int index, long{x, y}, long{w, h}, bool/int clip, r10d[unconventional for optimization] - nullable int foreignTexture
     endbr64
     MAKE_IMAGE_STACK = 56
     subq $MAKE_IMAGE_STACK, %rsp # model 8 + surface 8 + index 4 + {xy} 8 + {wh} 8 + clip 4 + foreignTexture 4 + padding 12
@@ -1740,120 +1993,6 @@ translate: # receives * model, int x, int y
     addq $TRANSLATE_STACK, %rsp
     ret
 
-.macro tuple a, b, r32, r64
-    movl $\b, %\r32 # with respect to the endianess
-    shlq $32, %\r64 # move b to high bits (to left)
-    orq $\a, %\r64 # move a to low bits (to right)
-.endm
-
-function createObjects
-createObjects:
-    endbr64
-    CREATE_OBJECTS_STACK = 72 # // 4 vectors of 4 floats of 4 bytes each = 4^3=64 0(%rsp) model + 8 alignment
-    subq $CREATE_OBJECTS_STACK, %rsp
-
-    //
-
-    call bootstrapCompute
-    call runCompute # // create background texture for msaa framebuffer
-
-    call createUbo
-    call createFbos
-
-    leaq (%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-
-    //
-
-    # everything inside .bss is initialized with zeroes
-    movl $0, OBJECT_TYPE_OFFSET+gPostprocessingTexquad(%rip)
-    movl $WIDTH, TEXQUAD_W_OFFSET+gPostprocessingTexquad(%rip)
-    movl $HEIGHT, TEXQUAD_H_OFFSET+gPostprocessingTexquad(%rip)
-
-    leaq gPostprocessingTexquad(%rip), %rdi # &gPostprocessingTexquad
-    xorq %rsi, %rsi
-    leaq (%rsp), %rdx # &model
-    call createTexquad
-
-    movl FBO_TEXTURE_OFFSET+gPostprocessingFbo(%rip), %eax
-    movl %eax, TEXQUAD_TEXTURE_OFFSET+gPostprocessingTexquad(%rip) # gPostprocessingTexquad.texture = gPostprocessingFbo.texture
-
-    // matrices multiplication mechanics gives us the only order to follow: scale then rotate then translate
-
-.macro resetModel
-    leaq (%rsp), %rdi # &model
-    callxt glmc_mat4_identity
-.endm
-
-///////////////////////////////// THE ACTUAL PLAYGROUND/CANVAS
-
-    leaq (%rsp), %rdi # &model
-    leaq IMAGE_NAME(%rip), %rsi
-    xorl %edx, %edx # index
-    xorl %ecx, %ecx # {x, y}
-    tuple WIDTH HEIGHT-70 r8d r8
-    xorl %r9d, %r9d # clip
-    call makeImage
-
-    movl $1, %edi # index
-    movl $COLOR_LINE, %esi
-    tuple 0 605 edx rdx # // {x0, y0}
-    tuple WIDTH 605 ecx rcx # // {x1, y1}
-    movl $70, %r8d # w
-    call makeLine
-
-    movl $50, %edi # pointSize
-    movl $50, %esi # dpi
-    call adjustFont
-
-    leaq (%rsp), %rdi # &model
-    leaq TEXT1(%rip), %rsi
-    movl $0xbababaff, %edx
-    movl $2, %ecx # index
-    tuple 5 570 r8d r8 # // {x, y}
-    tuple WIDTH-10 70 r9d r9 # // {w, h}
-    call makeText
-
-    leaq (%rsp), %rdi # &model
-    movl $350, %esi # // x0
-    movl $35, %edx # // y0
-    movl $0x3e333333, %ecx # (a=0.175f) * PI_radians
-    call rotate
-
-    movl $20, %edi # pointSize
-    movl $100, %esi # dpi
-    call adjustFont
-
-    leaq (%rsp), %rdi # &model
-    leaq TEXT2(%rip), %rsi
-    movl $0x050505ff, %edx # rgba color
-    movl $3, %ecx # index
-    tuple 190 385 r8d r8 # // {x, y}
-    tuple 540 50 r9d r9 # // {w, h}
-    call makeText
-
-    resetModel
-
-    leaq (%rsp), %rdi # &model
-    movl $75, %esi # // x0
-    movl $40, %edx # // y0
-    movl $0xbc23d70a, %ecx # (a=-0.01f) * PI_radians
-    call rotate
-
-    leaq (%rsp), %rdi # &model
-    leaq TEXT3(%rip), %rsi
-    movl $0xefefefff, %edx # rgba color
-    movl $4, %ecx # index
-    tuple 345 350 r8d r8 # // {x, y}
-    tuple 150 80 r9d r9 # // {w, h}
-    call makeText
-
-///////////////////////////////// THE END
-    //
-
-    addq $CREATE_OBJECTS_STACK, %rsp
-    ret
-
 function removeObjects
 removeObjects:
     endbr64
@@ -1959,6 +2098,7 @@ loop: # receives SDL_Window*
     call clearColor
 
     movl $0x4000, %edi # GL_COLOR_BUFFER_BIT
+    orl $0x400, %edi # GL_STENCIL_BUFFER_BIT
     callxt glClear
 
     call render
@@ -2094,6 +2234,10 @@ main:
     movl $4, %esi
     callxt SDL_GL_SetAttribute
     assert
+    movl $7, %edi # SDL_GL_STENCIL_SIZE
+    movl $8, %esi
+    callxt SDL_GL_SetAttribute
+    assert
     movl $15, %edi # SDL_GL_ACCELERATED_VISUAL
     movl $1, %esi
     callxt SDL_GL_SetAttribute
@@ -2144,6 +2288,16 @@ main:
     callxt glEnable
     movl $0x809e, %edi # GL_SAMPLE_ALPHA_TO_COVERAGE
     callxt glEnable
+
+    //
+
+    movl $0x0b90, %edi # GL_STENCIL_TEST
+    callxt glEnable
+
+    movl $0x1e00, %edi # GL_KEEP
+    movl $0x1e00, %esi # GL_KEEP
+    movl $0x1e01, %edx # GL_REPLACE
+    callxt glStencilOp
 
     //
 
