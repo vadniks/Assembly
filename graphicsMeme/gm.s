@@ -3,14 +3,14 @@
 
 // License: GNU GPLv3 only - this code is not intended for production - only for demonstration/learning purposes.
 // GM/gm/gm.s/gm.S/Meme Factory - Graphics meme challenge:
-//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations,
-//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in
-//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C
-//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like
-//     images via code - the lowest level possible! The features include: render of various sized textures of different images,
-//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture
+//     OpenGL (4.6 Core) 2D graphics prototype for demonstrating certain computer graphics concepts and their implementations, 
+//     mathematics, as well as dynamic libraries usage in position independent executables on GNU/Linux x86_64 platforms in 
+//     GNU Assembly(er), and SysV64 Linux assembly (low-level) development/programming techniques, manually rewritten from the C 
+//     source. This program is basically a tiny image manipulation program with all the necessary features to create meme-like 
+//     images via code - the lowest level possible! The features include: render of various sized textures of different images, 
+//     text render, arbitrary lines (size, color, position, width, slope, scaling, rotation, translation, opacity), texture 
 //     clipping, antializing, postprocessing effects (edge detection), result saving to file with image container encoding,
-//     texture generation via compute shader, erasing/cutting wholes in the composition via objects, direct storage access,
+//     texture generation via compute shader, erasing/cutting wholes in the composition via objects, direct storage access, 
 //     precompiled shaders in spir-v.
 // Dependencies: GLibC, LibM, SDL3, SDL3_Image, SDL3_TTF, CGLM, GL
 // Version: dated October 2026
@@ -170,7 +170,6 @@ OBJECT_PROGRAM_OFFSET = 8
 OBJECT_COLOR_OFFSET = 12
 
 // -----------------------------------> TODO: replace sse with avx or vex-sse
-// -----------------------------------> TODO: gpu-driven rendering via compute shaders
 
 # typedef struct {
 #     Object; // ms-anon-structure-tag = copies the whole structure
@@ -334,7 +333,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     movq %r8, 28(%rsp)
 
     //
-
+    
     movl $1, %edi
     movq (%rsp), %rsi # uint* vao
     callxt glCreateVertexArrays
@@ -381,7 +380,7 @@ bootstrapQuad: # uint* vao, uint* vbo, uint* ebo, uint verticesSize, const float
     callxt glVertexArrayElementBuffer
 
     //
-
+    
     addq $BOOTSTRAP_QUAD_STACK, %rsp
     ret
 
@@ -1374,10 +1373,8 @@ render:
     movl FBO_TEXTURE_OFFSET+gMsaaFbo(%rip), %eax
     movl %eax, 0(%rsp)
     movl $0x9100, 8(%rsp) # GL_TEXTURE_2D_MULTISAMPLE
-    movl $0, 16(%rsp)
-    movl $0, 24(%rsp)
-    movl $0, 32(%rsp)
-    movl $0, 40(%rsp)
+    xorps %xmm0, %xmm0
+    movaps %xmm0, 16(%rsp) # 4 parameters are zeroes
     movl $WIDTH, 48(%rsp)
     movl $HEIGHT, 56(%rsp)
     movl $1, 64(%rsp)
@@ -2212,7 +2209,8 @@ main:
     movq %r13, 40(%rsp)
     movq %r14, 48(%rsp)
     movq %r15, 56(%rsp)
-    # now, here in this code, consider them as additional volatile ones ;)
+    # now, here in this code, consider them as additional function-local volatile ones ;)
+    # unused
     xorq %rbx, %rbx
     xorq %rbp, %rbp
     xorq %r12, %r12
